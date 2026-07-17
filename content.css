@@ -1,0 +1,42 @@
+.csesbm-star {
+  display: inline-block;
+  vertical-align: middle;
+  margin-left: 6px;
+  padding: 2px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  line-height: 0;
+}
+
+.csesbm-star svg path {
+  fill: none;
+  stroke: #999;
+  stroke-width: 1.5;
+}
+
+.csesbm-star:hover svg path {
+  stroke: #b36f00;
+}
+
+.csesbm-star.is-active svg path {
+  fill: #f5a623;
+  stroke: #b36f00;
+}
+
+.csesbm-star-title {
+  margin-left: 10px;
+}
+
+.csesbm-star-title svg {
+  width: 20px;
+  height: 20px;
+}
+
+/* Bookmarked rows stand out at a glance in the problem set list. */
+li.task.csesbm-marked {
+  background: rgba(245, 166, 35, 0.14);
+  box-shadow: inset 3px 0 0 0 #f5a623;
+  border-radius: 3px;
+  padding-left: 6px;
+}

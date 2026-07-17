@@ -1,0 +1,50 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>CSES Bookmarker</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header class="header">
+      <div class="title-row">
+        <svg class="logo" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+          <path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z" />
+        </svg>
+        <h1>CSES Bookmarks</h1>
+      </div>
+      <div class="subline" id="subline"></div>
+    </header>
+
+    <nav class="tabs" id="tabs">
+      <button class="tab is-active" data-filter="all">All <span class="tab-count" data-count="all">0</span></button>
+      <button class="tab" data-filter="todo">To review <span class="tab-count" data-count="todo">0</span></button>
+      <button class="tab" data-filter="done">Reviewed <span class="tab-count" data-count="done">0</span></button>
+    </nav>
+
+    <div class="search-row">
+      <input id="search" type="text" placeholder="Filter by name or category…" autocomplete="off" />
+    </div>
+
+    <main id="list" class="list"></main>
+
+    <div id="empty" class="empty" hidden>
+      <p class="empty-title">No bookmarks yet</p>
+      <p class="empty-text">On <b>cses.fi</b>, click the ☆ star next to any problem to save it here for later.</p>
+    </div>
+
+    <footer class="footer">
+      <div class="footer-actions">
+        <button id="export-btn" class="ghost-btn" title="Download all bookmarks as a JSON file">Export</button>
+        <button id="import-btn" class="ghost-btn" title="Restore bookmarks from a JSON file">Import</button>
+        <input id="import-file" type="file" accept="application/json,.json" hidden />
+        <span class="spacer"></span>
+        <button id="clear-all" class="ghost-btn danger" hidden>Clear all</button>
+      </div>
+      <div id="flash" class="flash" hidden></div>
+    </footer>
+
+    <script src="storage.js"></script>
+    <script src="popup.js"></script>
+  </body>
+</html>
