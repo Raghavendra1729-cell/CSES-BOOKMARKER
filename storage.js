@@ -19,7 +19,19 @@
       addedAt: b.addedAt || Date.now(),
       status: b.status === "done" ? "done" : "todo",
       csesSolved: Boolean(b.csesSolved),
+      timeSpentMs: b.timeSpentMs != null ? b.timeSpentMs : null,
     };
+  }
+
+  // Shared by the on-page timer widget and the popup's solve-time tag.
+  function formatDuration(ms) {
+    if (!ms || ms < 0) return "0:00";
+    const totalSec = Math.floor(ms / 1000);
+    const h = Math.floor(totalSec / 3600);
+    const m = Math.floor((totalSec % 3600) / 60);
+    const s = totalSec % 60;
+    const pad = (n) => String(n).padStart(2, "0");
+    return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`;
   }
 
   const rawGetAll = () =>
@@ -89,6 +101,7 @@
     PREFIX,
     keyFor,
     normalize,
+    formatDuration,
     migrateIfNeeded,
     getAll,
     getMap,

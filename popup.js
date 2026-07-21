@@ -159,6 +159,14 @@
       meta.appendChild(tag);
     }
 
+    if (b.timeSpentMs) {
+      const timeTag = document.createElement("span");
+      timeTag.className = "time-tag";
+      timeTag.textContent = `⏱ ${CSESBM.formatDuration(b.timeSpentMs)}`;
+      timeTag.title = "Time from starting the timer to Accepted";
+      meta.appendChild(timeTag);
+    }
+
     const note = document.createElement("input");
     note.type = "text";
     note.className = "item-note";

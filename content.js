@@ -140,12 +140,118 @@
       extraClass: "csesbm-star-title",
       inside: true,
     });
+
+    initTimerWidget(id, getSolved);
+  }
+
+  // ---------- Solve timer ----------
+
+  function formatMs(ms) {
+    return (globalThis.CSESBM && CSESBM.formatDuration(ms)) || "0:00";
+  }
+
+  async function initTimerWidget(id, getSolved) {
+    let state = await CSESTimer.get(id);
+
+    // Reconciliation fallback: CSES already shows this solved (e.g. solved
+    // before the timer existed, or the result-page detection never ran)
+    // but our stored state never caught the accepted moment.
+    const alreadySolved = getSolved();
+    if (alreadySolved && (!state || state.status !== "stopped")) {
+      state = await CSESTimer.stop(id);
+    }
+    if (!state) {
+      if (alreadySolved) return; // nothing to time — solved before we existed
+      state = await CSESTimer.ensureStarted(id);
+    }
+
+    const box = document.createElement("div");
+    box.className = "csesbm-timer";
+    const label = document.createElement("span");
+    label.className = "csesbm-timer-label";
+    label.hidden = true;
+    label.textContent = "Solved in";
+    const timeEl = document.createElement("span");
+    timeEl.className = "csesbm-timer-time";
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "csesbm-timer-btn";
+    box.append(label, timeEl, btn);
+    document.body.appendChild(box);
+
+    let ticker = null;
+
+    function render() {
+      timeEl.textContent = formatMs(CSESTimer.elapsedMs(state));
+      box.classList.toggle("is-paused", state.status === "paused");
+      box.classList.toggle("is-stopped", state.status === "stopped");
+      label.hidden = state.status !== "stopped";
+      btn.hidden = state.status === "stopped";
+      btn.textContent = state.status === "running" ? "Pause" : "Resume";
+    }
+
+    function startTicker() {
+      clearInterval(ticker);
+      ticker = setInterval(render, 1000);
+    }
+
+    render();
+    if (state.status === "running") startTicker();
+
+    btn.addEventListener("click", async () => {
+      if (state.status === "running") {
+        state = await CSESTimer.pause(id);
+        clearInterval(ticker);
+      } else if (state.status === "paused") {
+        state = await CSESTimer.resume(id);
+        startTicker();
+      }
+      render();
+    });
+  }
+
+  // The result page reuses the same `.task-score` verdict marker the rest of
+  // the site uses for "solved" — scoped to the sidebar's current-task link
+  // first (same reliable spot decorateTaskPage already reads), falling back
+  // to a document-wide search if that scope isn't present on this layout.
+  function detectAcceptedOnResultPage() {
+    const sidebarCurrent = document.querySelector(".nav.sidebar a.current");
+    if (sidebarCurrent && sidebarCurrent.querySelector(".task-score")) {
+      return detectSolved(sidebarCurrent);
+    }
+    return detectSolved(document);
+  }
+
+  function showAcceptedToast(timeText) {
+    const toast = document.createElement("div");
+    toast.className = "csesbm-toast";
+    toast.textContent = `Timer stopped — solved in ${timeText}`;
+    document.body.appendChild(toast);
+    requestAnimationFrame(() => toast.classList.add("is-visible"));
+    setTimeout(() => toast.remove(), 5000);
+  }
+
+  async function decorateResultPage() {
+    const link = document.querySelector('a[href*="/problemset/task/"]');
+    const id = link ? idFromHref(link.getAttribute("href")) : null;
+    if (!id) return;
+
+    if (!detectAcceptedOnResultPage()) return;
+
+    const state = await CSESTimer.stop(id);
+    showAcceptedToast(formatMs(state.finalMs));
+
+    await S.migrateIfNeeded();
+    const existing = await S.get(id);
+    if (existing) await S.patch(id, { timeSpentMs: state.finalMs });
   }
 
   function init() {
     const path = location.pathname;
     if (/^\/problemset\/task\/\d+/.test(path)) {
       decorateTaskPage();
+    } else if (/^\/problemset\/result\/\d+/.test(path)) {
+      decorateResultPage();
     } else {
       // Everything else under /problemset (the root list, /problemset/list/, etc.)
       // Self-guards by only decorating <ul class="task-list"> found under an <h2>.
