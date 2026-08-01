@@ -33,6 +33,23 @@
       <p class="empty-text">On <b>cses.fi</b>, click the ☆ star next to any problem to save it here for later.</p>
     </div>
 
+    <section class="review-settings" id="review-settings">
+      <div class="review-settings-title">AI review (CSES results)</div>
+      <label class="review-toggle">
+        <input type="checkbox" id="review-enabled" checked />
+        <span>Auto-review after submit</span>
+      </label>
+      <label class="review-field">
+        <span>Local server</span>
+        <input id="review-server" type="text" spellcheck="false" autocomplete="off" placeholder="http://127.0.0.1:8765" />
+      </label>
+      <div class="review-settings-actions">
+        <button type="button" id="review-save" class="ghost-btn">Save</button>
+        <button type="button" id="review-health" class="ghost-btn">Check server</button>
+      </div>
+      <div id="review-status" class="review-status" hidden></div>
+    </section>
+
     <footer class="footer">
       <div class="footer-actions">
         <button id="export-btn" class="ghost-btn" title="Download all bookmarks as a JSON file">Export</button>

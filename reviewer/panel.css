@@ -1,0 +1,175 @@
+/* Post-submission AI review panel — CSES result pages only */
+
+.csesbm-review {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  z-index: 2147483646;
+  width: min(360px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  overflow: auto;
+  padding: 0;
+  border-radius: 12px;
+  background: #16181d;
+  color: #e8eaed;
+  font: 13px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
+  opacity: 0;
+  transform: translateY(8px);
+  transition: opacity 0.22s ease, transform 0.22s ease;
+  border: 1px solid #2a2e36;
+}
+
+.csesbm-review.is-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.csesbm-review-banner {
+  padding: 12px 14px;
+  font-weight: 700;
+  font-size: 13.5px;
+  letter-spacing: 0.01em;
+  border-radius: 12px 12px 0 0;
+  background: #2a2e36;
+}
+
+.csesbm-review.is-accepted .csesbm-review-banner {
+  background: linear-gradient(135deg, #14532d, #166534);
+  color: #dcfce7;
+}
+
+.csesbm-review.is-rejected .csesbm-review-banner {
+  background: linear-gradient(135deg, #7f1d1d, #991b1b);
+  color: #fee2e2;
+}
+
+.csesbm-review.is-loading .csesbm-review-banner {
+  background: #1e3a5f;
+  color: #dbeafe;
+}
+
+.csesbm-review.is-error .csesbm-review-banner {
+  background: #713f12;
+  color: #fef3c7;
+}
+
+.csesbm-review-loading {
+  padding: 16px 14px 18px;
+  color: #93c5fd;
+}
+
+.csesbm-review-score {
+  padding: 12px 14px 4px;
+  border-bottom: 1px solid #2a2e36;
+}
+
+.csesbm-score-main {
+  font-weight: 700;
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+}
+
+.csesbm-score-sub,
+.csesbm-score-reason {
+  margin-top: 4px;
+  color: #9aa1ab;
+  font-size: 12px;
+}
+
+.csesbm-review-section {
+  padding: 10px 14px;
+  border-bottom: 1px solid #2a2e36;
+}
+
+.csesbm-review-h {
+  margin: 0 0 6px;
+  font-size: 11px;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #8b929c;
+}
+
+.csesbm-review-list {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.csesbm-review-list li {
+  margin: 3px 0;
+}
+
+.csesbm-hint {
+  background: rgba(245, 166, 35, 0.08);
+}
+
+.csesbm-hint-text {
+  margin: 0;
+  color: #f5d78e;
+}
+
+.csesbm-warn {
+  background: rgba(245, 166, 35, 0.1);
+}
+
+.csesbm-ok p {
+  margin: 0;
+  color: #86efac;
+}
+
+.csesbm-mono {
+  margin: 2px 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+}
+
+.csesbm-cat-grid {
+  display: grid;
+  gap: 4px;
+}
+
+.csesbm-cat-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.csesbm-cat-label {
+  text-transform: capitalize;
+  color: #c4c9d1;
+}
+
+.csesbm-cat-stars {
+  color: #f5a623;
+  letter-spacing: 1px;
+  font-size: 12px;
+}
+
+.csesbm-muted {
+  color: #6b7280;
+  list-style: none;
+  margin-left: -18px;
+}
+
+.csesbm-review-foot {
+  display: flex;
+  justify-content: flex-end;
+  padding: 10px 12px 12px;
+}
+
+.csesbm-review-close {
+  border: 1px solid #3a3f49;
+  background: transparent;
+  color: #c4c9d1;
+  border-radius: 6px;
+  padding: 5px 10px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.csesbm-review-close:hover {
+  background: #2a2e36;
+  color: #fff;
+}

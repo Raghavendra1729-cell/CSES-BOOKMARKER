@@ -234,16 +234,72 @@
   async function decorateResultPage() {
     const link = document.querySelector('a[href*="/problemset/task/"]');
     const id = link ? idFromHref(link.getAttribute("href")) : null;
-    if (!id) return;
 
-    if (!detectAcceptedOnResultPage()) return;
+    // Timer stop only on Accepted (existing behavior).
+    if (id && detectAcceptedOnResultPage()) {
+      const state = await CSESTimer.stop(id);
+      showAcceptedToast(formatMs(state.finalMs));
 
-    const state = await CSESTimer.stop(id);
-    showAcceptedToast(formatMs(state.finalMs));
+      await S.migrateIfNeeded();
+      const existing = await S.get(id);
+      if (existing) await S.patch(id, { timeSpentMs: state.finalMs });
+    }
 
-    await S.migrateIfNeeded();
-    const existing = await S.get(id);
-    if (existing) await S.patch(id, { timeSpentMs: state.finalMs });
+    // AI review for every verdict (AC / WA / TLE / …).
+    runPostSubmissionReview();
+  }
+
+  // ---------- AI post-submission review ----------
+
+  function runPostSubmissionReview() {
+    const scrape = globalThis.CSESReviewScrape;
+    const panel = globalThis.CSESReviewPanel;
+    if (!scrape || !panel) return;
+
+    let submission;
+    try {
+      submission = scrape.scrapeSubmission();
+    } catch (e) {
+      panel.renderError("Could not read this result page.");
+      return;
+    }
+
+    if (!submission.code || !submission.code.trim()) {
+      // Result page may still be loading code; retry briefly.
+      setTimeout(() => {
+        try {
+          submission = scrape.scrapeSubmission();
+        } catch {
+          return;
+        }
+        if (!submission.code || !submission.code.trim()) {
+          panel.renderError("No source code found on this result page.");
+          return;
+        }
+        requestReview(submission, panel);
+      }, 600);
+      return;
+    }
+
+    requestReview(submission, panel);
+  }
+
+  function requestReview(submission, panel) {
+    panel.renderLoading();
+    chrome.runtime.sendMessage(
+      { type: "REVIEW_SUBMISSION", submission },
+      (resp) => {
+        if (chrome.runtime.lastError) {
+          panel.renderError(chrome.runtime.lastError.message || "Extension error");
+          return;
+        }
+        if (!resp || !resp.ok) {
+          panel.renderError((resp && resp.error) || "Review failed");
+          return;
+        }
+        panel.renderReview(resp.data, submission);
+      }
+    );
   }
 
   function init() {

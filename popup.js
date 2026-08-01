@@ -300,9 +300,75 @@
     });
   });
 
+  // ---------- AI review settings ----------
+  const reviewEnabled = document.getElementById("review-enabled");
+  const reviewServer = document.getElementById("review-server");
+  const reviewSave = document.getElementById("review-save");
+  const reviewHealth = document.getElementById("review-health");
+  const reviewStatus = document.getElementById("review-status");
+
+  function setReviewStatus(msg, isError) {
+    if (!reviewStatus) return;
+    reviewStatus.textContent = msg;
+    reviewStatus.hidden = !msg;
+    reviewStatus.classList.toggle("error", Boolean(isError));
+  }
+
+  function loadReviewSettings() {
+    chrome.runtime.sendMessage({ type: "GET_REVIEW_SETTINGS" }, (s) => {
+      if (chrome.runtime.lastError || !s) return;
+      if (reviewEnabled) reviewEnabled.checked = s.enabled !== false;
+      if (reviewServer) reviewServer.value = s.serverUrl || "http://127.0.0.1:8765";
+    });
+  }
+
+  if (reviewSave) {
+    reviewSave.addEventListener("click", () => {
+      const settings = {
+        enabled: reviewEnabled ? reviewEnabled.checked : true,
+        serverUrl: (reviewServer && reviewServer.value.trim()) || "http://127.0.0.1:8765",
+      };
+      chrome.runtime.sendMessage({ type: "SET_REVIEW_SETTINGS", settings }, (resp) => {
+        if (chrome.runtime.lastError) {
+          setReviewStatus(chrome.runtime.lastError.message, true);
+          return;
+        }
+        setReviewStatus(resp && resp.ok ? "Saved." : "Could not save.", !(resp && resp.ok));
+      });
+    });
+  }
+
+  if (reviewHealth) {
+    reviewHealth.addEventListener("click", () => {
+      setReviewStatus("Checking…");
+      chrome.runtime.sendMessage({ type: "HEALTH_CHECK" }, (resp) => {
+        if (chrome.runtime.lastError) {
+          setReviewStatus(chrome.runtime.lastError.message, true);
+          return;
+        }
+        if (!resp || !resp.ok) {
+          setReviewStatus(
+            "Server offline. Run: python -m server.app  (" +
+              ((resp && resp.error) || "unreachable") +
+              ")",
+            true
+          );
+          return;
+        }
+        const d = resp.data || {};
+        if (!d.has_token) {
+          setReviewStatus("Server up, but HF_TOKEN missing in .env", true);
+          return;
+        }
+        setReviewStatus("OK · " + (d.model || "model set") + " · token present");
+      });
+    });
+  }
+
   (async function init() {
     await CSESBM.migrateIfNeeded();
     map = await CSESBM.getMap();
     render();
+    loadReviewSettings();
   })();
 })();
