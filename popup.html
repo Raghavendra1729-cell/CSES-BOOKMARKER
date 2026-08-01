@@ -35,6 +35,10 @@
 
     <section class="review-settings" id="review-settings">
       <div class="review-settings-title">AI review (CSES results)</div>
+      <p class="review-note">
+        Chrome cannot read <code>.env</code>. Use the field below <b>or</b>
+        <code>config.local.js</code>, then Reload the extension.
+      </p>
       <label class="review-toggle">
         <input type="checkbox" id="review-enabled" checked />
         <span>Auto-review after submit</span>
@@ -46,7 +50,7 @@
           type="password"
           spellcheck="false"
           autocomplete="off"
-          placeholder="hf_… paste once, then Save"
+          placeholder="hf_… paste here, then click Save"
         />
       </label>
       <div id="review-token-hint" class="review-token-hint" hidden></div>

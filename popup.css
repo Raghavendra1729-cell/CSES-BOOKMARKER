@@ -395,6 +395,20 @@ body {
   color: var(--muted);
 }
 
+.review-note {
+  margin: 0 0 10px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--muted);
+}
+
+.review-note code {
+  font-size: 10.5px;
+  background: var(--bg);
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+
 /* ---------- Footer ---------- */
 .footer {
   border-top: 1px solid var(--border);

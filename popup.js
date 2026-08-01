@@ -324,12 +324,20 @@
     if (reviewTokenHint) {
       if (s.hasToken) {
         reviewTokenHint.hidden = false;
-        reviewTokenHint.textContent = "Token saved (" + (s.tokenHint || "••••") + ")";
-        if (reviewToken) reviewToken.placeholder = "Leave blank to keep saved token";
+        const src =
+          s.tokenSource === "config.local.js"
+            ? "from config.local.js"
+            : s.tokenSource === "popup"
+              ? "from popup storage"
+              : "loaded";
+        reviewTokenHint.textContent =
+          "Token ready (" + (s.tokenHint || "••••") + ", " + src + ")";
+        if (reviewToken) reviewToken.placeholder = "Leave blank to keep current token";
       } else {
-        reviewTokenHint.hidden = true;
-        reviewTokenHint.textContent = "";
-        if (reviewToken) reviewToken.placeholder = "hf_… paste once, then Save";
+        reviewTokenHint.hidden = false;
+        reviewTokenHint.textContent =
+          "No token yet. .env is ignored — paste hf_… below and Save.";
+        if (reviewToken) reviewToken.placeholder = "hf_… paste here, then click Save";
       }
     }
   }
@@ -363,8 +371,8 @@
           applySettingsToUi(resp.settings);
           setReviewStatus(
             resp.settings && resp.settings.hasToken
-              ? "Saved. Reviews run automatically — no server needed."
-              : "Saved, but no token yet. Paste HF token and Save again.",
+              ? "Saved. Token ready — no server, .env not used."
+              : "Saved, but no token yet. Paste hf_… in the token field and Save.",
             !(resp.settings && resp.settings.hasToken)
           );
         } else {
@@ -402,7 +410,11 @@
         }
         const d = resp.data || {};
         setReviewStatus(
-          "OK · " + (d.model || "model set") + " · token works (direct HF, no server)"
+          "OK · " +
+            (d.model || "model set") +
+            " · via " +
+            (d.token_source || "token") +
+            " · direct HF"
         );
       });
     });

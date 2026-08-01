@@ -8,13 +8,18 @@ Chrome extension for [CSES Problem Set](https://cses.fi/problemset/):
 
 Personal use only. Reviews call the **Hugging Face OpenAI-compatible router directly** from the extension background worker. **No local server to keep running.**
 
-## Why no server?
+## Why `.env` does not work
 
-Chrome extensions cannot read your shell `.env` file. The previous local Python server existed only as a proxy for that. You do **not** need it anymore.
+Chrome extensions **cannot read `.env`**. Putting `HF_TOKEN` only in `.env` has no effect.
 
-1. Paste your HF token **once** in the extension popup → Save  
-2. Token stays in `chrome.storage.local` on your machine  
-3. On each CSES result page, the extension calls HF by itself  
+Use **one** of these instead:
+
+| Method | How |
+|--------|-----|
+| **Popup (easiest)** | Open extension popup → paste `hf_…` → **Save** → **Test API** |
+| **`config.local.js`** | Copy `config.local.example.js` → `config.local.js`, put token, **Reload** extension |
+
+Both stay on your machine. `config.local.js` and `.env` are gitignored.
 
 ## Setup
 
@@ -22,14 +27,24 @@ Chrome extensions cannot read your shell `.env` file. The previous local Python 
 
 1. Chrome → `chrome://extensions`
 2. Enable **Developer mode**
-3. **Load unpacked** → this folder (or click **Reload** if already loaded)
+3. **Load unpacked** → this folder (or click **Reload** after changing `config.local.js`)
 
 ### 2. Add your Hugging Face token
 
-1. Open the extension popup  
+**Option A — popup**
+
+1. Click the extension icon  
 2. Paste token from https://huggingface.co/settings/tokens  
-3. Confirm model (default `MiniMaxAI/MiniMax-M3:novita`)  
-4. **Save** → **Test API**  
+3. **Save** → **Test API** (should say OK)
+
+**Option B — file** (if you prefer files over the popup)
+
+```bash
+cp config.local.example.js config.local.js
+# edit config.local.js → set hfToken: "hf_..."
+```
+
+Then **Reload** the extension on `chrome://extensions`.
 
 ### 3. Use it
 

@@ -1,5 +1,17 @@
-/* global CSESReviewPrompts, CSESReviewHF */
+/* global CSESReviewPrompts, CSESReviewHF, CSESBM_LOCAL_CONFIG */
 importScripts("reviewer/prompts.js", "reviewer/hf-client.js");
+
+// Optional file-based secrets (config.local.js). Extensions cannot read .env.
+// Missing file is fine — user can still paste token in the popup.
+let FILE_CONFIG = {};
+try {
+  importScripts("config.local.js");
+  if (typeof CSESBM_LOCAL_CONFIG === "object" && CSESBM_LOCAL_CONFIG) {
+    FILE_CONFIG = CSESBM_LOCAL_CONFIG;
+  }
+} catch (_e) {
+  FILE_CONFIG = {};
+}
 
 const PREFIX = "csesbm:";
 const REVIEW_SETTINGS_KEY = "csesbm:reviewSettings";
@@ -34,20 +46,52 @@ chrome.storage.onChanged.addListener((changes, area) => {
   if (Object.keys(changes).some((k) => k.startsWith(PREFIX))) recount();
 });
 
+function fileToken() {
+  return String((FILE_CONFIG && FILE_CONFIG.hfToken) || "").trim();
+}
+
+function mergeSettings(stored) {
+  const s = { ...DEFAULT_REVIEW_SETTINGS, ...(stored || {}) };
+
+  // File config fills gaps; popup/storage wins if set.
+  if (!(s.hfToken || "").trim() && fileToken()) {
+    s.hfToken = fileToken();
+    s._tokenSource = "config.local.js";
+  } else if ((s.hfToken || "").trim()) {
+    s._tokenSource = "popup";
+  } else {
+    s._tokenSource = "none";
+  }
+
+  if (!(s.model || "").trim() && FILE_CONFIG.model) {
+    s.model = String(FILE_CONFIG.model).trim();
+  }
+  if (!(s.baseUrl || "").trim() && FILE_CONFIG.baseUrl) {
+    s.baseUrl = String(FILE_CONFIG.baseUrl).trim();
+  }
+  if (!s.maxTokens && FILE_CONFIG.maxTokens) {
+    s.maxTokens = Number(FILE_CONFIG.maxTokens) || DEFAULT_REVIEW_SETTINGS.maxTokens;
+  }
+
+  return s;
+}
+
 function getReviewSettings() {
   return new Promise((resolve) => {
     chrome.storage.local.get(REVIEW_SETTINGS_KEY, (res) => {
-      resolve({ ...DEFAULT_REVIEW_SETTINGS, ...(res[REVIEW_SETTINGS_KEY] || {}) });
+      resolve(mergeSettings(res[REVIEW_SETTINGS_KEY]));
     });
   });
 }
 
 function sanitizeSettingsForClient(s) {
-  // Never send the full token to the popup UI when not needed; mask for display.
+  const hasToken = Boolean((s.hfToken || "").trim());
   return {
     enabled: s.enabled !== false,
-    hasToken: Boolean((s.hfToken || "").trim()),
+    hasToken,
     tokenHint: maskToken(s.hfToken),
+    tokenSource: hasToken ? s._tokenSource || "unknown" : "none",
+    hasFileConfig: Boolean(fileToken()),
     baseUrl: s.baseUrl || DEFAULT_REVIEW_SETTINGS.baseUrl,
     model: s.model || DEFAULT_REVIEW_SETTINGS.model,
     maxTokens: s.maxTokens || DEFAULT_REVIEW_SETTINGS.maxTokens,
@@ -70,7 +114,9 @@ async function postReview(submission) {
     return {
       ok: false,
       error:
-        "HF token not set. Open the CSES Bookmarker popup, paste your Hugging Face token, and Save.",
+        "HF token not found. The extension cannot read .env. " +
+        "Either: (1) open the popup → paste token → Save, or " +
+        "(2) copy config.local.example.js to config.local.js with your token, then Reload the extension.",
     };
   }
   if (!(submission && String(submission.code || "").trim())) {
@@ -108,36 +154,51 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg.type === "SET_REVIEW_SETTINGS") {
     getReviewSettings().then((cur) => {
       const incoming = msg.settings || {};
-      const next = {
-        ...DEFAULT_REVIEW_SETTINGS,
-        ...cur,
-        enabled: incoming.enabled !== false,
-        baseUrl: (incoming.baseUrl || cur.baseUrl || DEFAULT_REVIEW_SETTINGS.baseUrl).trim(),
-        model: (incoming.model || cur.model || DEFAULT_REVIEW_SETTINGS.model).trim(),
-        maxTokens:
-          Number(incoming.maxTokens) ||
-          cur.maxTokens ||
-          DEFAULT_REVIEW_SETTINGS.maxTokens,
-      };
+      // Persist only storage fields (not file-derived token unless user typed one)
+      chrome.storage.local.get(REVIEW_SETTINGS_KEY, (res) => {
+        const stored = res[REVIEW_SETTINGS_KEY] || {};
+        const next = {
+          enabled: incoming.enabled !== false,
+          baseUrl: (
+            incoming.baseUrl ||
+            stored.baseUrl ||
+            DEFAULT_REVIEW_SETTINGS.baseUrl
+          ).trim(),
+          model: (
+            incoming.model ||
+            stored.model ||
+            DEFAULT_REVIEW_SETTINGS.model
+          ).trim(),
+          maxTokens:
+            Number(incoming.maxTokens) ||
+            stored.maxTokens ||
+            DEFAULT_REVIEW_SETTINGS.maxTokens,
+          hfToken: stored.hfToken || "",
+        };
 
-      // Only overwrite token if the user typed a new non-empty value
-      // (empty field in popup means "keep existing").
-      if (incoming.hfToken != null && String(incoming.hfToken).trim() !== "") {
-        next.hfToken = String(incoming.hfToken).trim();
-      }
+        if (incoming.hfToken != null && String(incoming.hfToken).trim() !== "") {
+          next.hfToken = String(incoming.hfToken).trim();
+        }
 
-      chrome.storage.local.set({ [REVIEW_SETTINGS_KEY]: next }, () => {
-        sendResponse({ ok: true, settings: sanitizeSettingsForClient(next) });
+        chrome.storage.local.set({ [REVIEW_SETTINGS_KEY]: next }, () => {
+          sendResponse({
+            ok: true,
+            settings: sanitizeSettingsForClient(mergeSettings(next)),
+          });
+        });
       });
     });
     return true;
   }
 
   if (msg.type === "CLEAR_HF_TOKEN") {
-    getReviewSettings().then((cur) => {
-      const next = { ...cur, hfToken: "" };
-      chrome.storage.local.set({ [REVIEW_SETTINGS_KEY]: next }, () => {
-        sendResponse({ ok: true, settings: sanitizeSettingsForClient(next) });
+    chrome.storage.local.get(REVIEW_SETTINGS_KEY, (res) => {
+      const stored = { ...(res[REVIEW_SETTINGS_KEY] || {}), hfToken: "" };
+      chrome.storage.local.set({ [REVIEW_SETTINGS_KEY]: stored }, () => {
+        sendResponse({
+          ok: true,
+          settings: sanitizeSettingsForClient(mergeSettings(stored)),
+        });
       });
     });
     return true;
@@ -148,11 +209,12 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       if (!(settings.hfToken || "").trim()) {
         sendResponse({
           ok: false,
-          error: "No HF token saved. Paste it in the popup and Save.",
+          error:
+            "No HF token. Extension cannot read .env — use popup Save or config.local.js",
+          hasFileConfig: Boolean(fileToken()),
         });
         return;
       }
-      // Lightweight check: models list or a tiny probe against the base URL.
       const base = String(settings.baseUrl || DEFAULT_REVIEW_SETTINGS.baseUrl).replace(
         /\/$/,
         ""
@@ -161,13 +223,12 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         const resp = await fetch(base + "/models", {
           headers: { Authorization: "Bearer " + settings.hfToken.trim() },
         });
-        // Some HF router deployments may not expose /models; 401 = bad token,
-        // network ok with other statuses still means reachability.
         if (resp.status === 401 || resp.status === 403) {
           sendResponse({
             ok: false,
             error: "HF rejected the token (HTTP " + resp.status + ").",
             model: settings.model,
+            tokenSource: settings._tokenSource,
           });
           return;
         }
@@ -178,6 +239,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
             model: settings.model,
             base_url: base,
             http_status: resp.status,
+            token_source: settings._tokenSource,
           },
         });
       } catch (e) {
