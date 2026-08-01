@@ -69,8 +69,15 @@ function mergeSettings(stored) {
   if (!(s.baseUrl || "").trim() && FILE_CONFIG.baseUrl) {
     s.baseUrl = String(FILE_CONFIG.baseUrl).trim();
   }
-  if (!s.maxTokens && FILE_CONFIG.maxTokens) {
-    s.maxTokens = Number(FILE_CONFIG.maxTokens) || DEFAULT_REVIEW_SETTINGS.maxTokens;
+  if (FILE_CONFIG.maxTokens) {
+    const fileMax = Number(FILE_CONFIG.maxTokens);
+    // Prefer higher budget (reasoning models need headroom).
+    if (fileMax && (!s.maxTokens || fileMax > s.maxTokens)) {
+      s.maxTokens = fileMax;
+    }
+  }
+  if (!s.maxTokens || s.maxTokens < 2048) {
+    s.maxTokens = Math.max(Number(s.maxTokens) || 0, DEFAULT_REVIEW_SETTINGS.maxTokens, 2048);
   }
 
   return s;

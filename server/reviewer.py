@@ -29,10 +29,14 @@ def _model() -> str:
 
 
 def _max_tokens() -> int:
+    # MiniMax-M3 is a reasoning model: low caps (e.g. 400) are spent entirely on
+    # reasoning_tokens and content comes back empty (finish_reason=length).
     try:
-        return int(os.environ.get("REVIEW_MAX_TOKENS", "400"))
+        n = int(os.environ.get("REVIEW_MAX_TOKENS", "2048"))
     except ValueError:
-        return 400
+        n = 2048
+    return max(n, 1024)
+
 
 
 def _extract_json(text: str) -> dict[str, Any]:

@@ -2,11 +2,15 @@
 // Same interface as:
 //   OpenAI(base_url="https://router.huggingface.co/v1", api_key=HF_TOKEN)
 //   model="MiniMaxAI/MiniMax-M3:novita"
+//
+// MiniMax-M3 is a reasoning model: completion budget is shared with
+// reasoning_tokens. Too-low max_tokens → empty content + finish_reason "length".
 (function (global) {
   const DEFAULTS = {
     baseUrl: "https://router.huggingface.co/v1",
     model: "MiniMaxAI/MiniMax-M3:novita",
-    maxTokens: 400,
+    // Need headroom for reasoning + JSON answer (400 is too small → empty content).
+    maxTokens: 2048,
   };
 
   const MAX_RETRIES = 3;
@@ -35,6 +39,30 @@
     }
   }
 
+  /** Normalize message.content which may be string | array | null. */
+  function messageContent(message) {
+    if (!message) return "";
+    const c = message.content;
+    if (typeof c === "string") return c;
+    if (Array.isArray(c)) {
+      return c
+        .map((part) => {
+          if (typeof part === "string") return part;
+          if (part && typeof part.text === "string") return part.text;
+          if (part && part.type === "text" && part.text) return part.text;
+          return "";
+        })
+        .join("");
+    }
+    // Some providers put the final answer in other fields when content is empty.
+    if (typeof message.reasoning_content === "string" && !c) {
+      // Do not use raw reasoning as the answer — only as last-resort JSON scrape.
+      const m = message.reasoning_content.match(/\{[\s\S]*\}/);
+      if (m) return m[0];
+    }
+    return c == null ? "" : String(c);
+  }
+
   function isTransient(errMsg, status) {
     if (status === 429 || status === 502 || status === 503 || status === 504) {
       return true;
@@ -53,10 +81,16 @@
   async function chatCompletion(settings, messages) {
     const baseUrl = String(settings.baseUrl || DEFAULTS.baseUrl).replace(/\/$/, "");
     const model = settings.model || DEFAULTS.model;
-    const maxTokens = Number(settings.maxTokens) || DEFAULTS.maxTokens;
+    let maxTokens = Number(settings.maxTokens) || DEFAULTS.maxTokens;
+    // Clamp floor for reasoning models so we never re-hit empty-content.
+    // Empirically max_tokens=400 → 399 reasoning + empty content on MiniMax-M3.
+    if (maxTokens < 2048) maxTokens = 2048;
+
     const token = (settings.hfToken || "").trim();
     if (!token) {
-      throw new Error("HF token not set. Open the extension popup and paste your Hugging Face token.");
+      throw new Error(
+        "HF token not set. Open the extension popup and paste your Hugging Face token."
+      );
     }
 
     const url = baseUrl + "/chat/completions";
@@ -100,13 +134,35 @@
           throw err;
         }
 
-        const content =
-          body &&
-          body.choices &&
-          body.choices[0] &&
-          body.choices[0].message &&
-          body.choices[0].message.content;
-        return { content: content || "", model };
+        const choice = body && body.choices && body.choices[0];
+        const content = messageContent(choice && choice.message);
+        const finish = choice && choice.finish_reason;
+        const usage = body && body.usage;
+        const reasoningTok =
+          usage &&
+          usage.completion_tokens_details &&
+          usage.completion_tokens_details.reasoning_tokens;
+
+        if (!String(content || "").trim()) {
+          // Retry once with a larger budget if we hit the reasoning ceiling.
+          if (finish === "length" && attempt < MAX_RETRIES - 1 && maxTokens < 4096) {
+            maxTokens = Math.min(4096, maxTokens * 2);
+            lastErr = new Error(
+              "Empty content (reasoning used all tokens); retrying with max_tokens=" +
+                maxTokens
+            );
+            await sleep(BACKOFF_BASE_MS);
+            continue;
+          }
+          throw new Error(
+            "Empty model response" +
+              (finish ? " (finish=" + finish + ")" : "") +
+              (reasoningTok != null ? ", reasoning_tokens=" + reasoningTok : "") +
+              ". MiniMax spends tokens on internal reasoning; raise max tokens (try 2048+)."
+          );
+        }
+
+        return { content, model: (body && body.model) || model };
       } catch (e) {
         lastErr = e;
         const status = e && e.status;
