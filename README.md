@@ -6,60 +6,71 @@ Chrome extension for [CSES Problem Set](https://cses.fi/problemset/):
 - per-problem solve timer
 - **AI post-submission code review** (after every result)
 
-Personal use only. Reviews use a **local Python server** that calls the Hugging Face OpenAI-compatible router. Your `HF_TOKEN` never leaves your machine except to HF.
+Personal use only. Reviews call the **Hugging Face OpenAI-compatible router directly** from the extension background worker. **No local server to keep running.**
 
-## Security
+## Why no server?
 
-| File | Purpose |
-|------|---------|
-| `.env` | Your secrets (gitignored) |
-| `.env.example` | Template — safe to commit |
+Chrome extensions cannot read your shell `.env` file. The previous local Python server existed only as a proxy for that. You do **not** need it anymore.
 
-**Never commit `.env` or paste tokens into the extension.**
+1. Paste your HF token **once** in the extension popup → Save  
+2. Token stays in `chrome.storage.local` on your machine  
+3. On each CSES result page, the extension calls HF by itself  
 
 ## Setup
 
-### 1. Token + model
-
-```bash
-cp .env.example .env
-# edit .env and set:
-# HF_TOKEN=hf_...
-```
-
-Defaults (already in `.env.example`):
-
-```
-HF_BASE_URL=https://router.huggingface.co/v1
-REVIEW_MODEL=MiniMaxAI/MiniMax-M3:novita
-REVIEW_PORT=8765
-```
-
-### 2. Local review server
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-python -m server.app
-```
-
-Health check: [http://127.0.0.1:8765/health](http://127.0.0.1:8765/health)
-
-### 3. Load the extension
+### 1. Load the extension
 
 1. Chrome → `chrome://extensions`
 2. Enable **Developer mode**
-3. **Load unpacked** → this repo folder
-4. Open the popup → **Check server** (should show token present)
+3. **Load unpacked** → this folder (or click **Reload** if already loaded)
 
-## How review works
+### 2. Add your Hugging Face token
 
-1. You submit on CSES → land on `/problemset/result/...`
-2. Extension scrapes verdict + source code
-3. Background worker `POST`s to `http://127.0.0.1:8765/review`
-4. Server calls HF router with a strict **reviewer-only** system prompt
-5. Panel appears (green = Accepted, red = rejected)
+1. Open the extension popup  
+2. Paste token from https://huggingface.co/settings/tokens  
+3. Confirm model (default `MiniMaxAI/MiniMax-M3:novita`)  
+4. **Save** → **Test API**  
+
+### 3. Use it
+
+Submit on CSES → land on `/problemset/result/...` → review panel appears automatically.
+
+## How it works
+
+```
+CSES result page
+  → scrape verdict + code
+  → background service worker
+  → POST https://router.huggingface.co/v1/chat/completions
+       Authorization: Bearer <token from chrome.storage>
+       model: MiniMaxAI/MiniMax-M3:novita
+  → review panel (green = AC, red = rejected)
+```
+
+Same API shape as:
+
+```python
+from openai import OpenAI
+import os
+
+client = OpenAI(
+    base_url="https://router.huggingface.co/v1",
+    api_key=os.environ["HF_TOKEN"],
+)
+client.chat.completions.create(model="MiniMaxAI/MiniMax-M3:novita", messages=[...])
+```
+
+## Security
+
+| Where | What |
+|-------|------|
+| Extension popup → `chrome.storage.local` | Your HF token (not synced to Google account) |
+| `.env` / `.env.example` | Optional notes only; **not used by the extension** |
+| GitHub | Never commit tokens (`.env` is gitignored) |
+
+Clear the token anytime with **Clear token** in the popup.
+
+## Review behavior
 
 ### Rejected (WA / TLE / MLE / RE / CE)
 
@@ -75,30 +86,15 @@ Health check: [http://127.0.0.1:8765/health](http://127.0.0.1:8765/health)
 - Optimal? + alternative approach **names** only  
 - Ratings + improvement checklist  
 
-The model is instructed **never** to solve the problem or leak algorithms on rejects.
+## Optional local Python server
 
-## Popup settings
+`server/` is optional (dev/CLI). Normal use is extension-only. If you still want it:
 
-- **Auto-review after submit** — on/off  
-- **Local server** URL (default `http://127.0.0.1:8765`)
-
-## LLM interface
-
-Matches the HF router OpenAI client:
-
-```python
-from openai import OpenAI
-import os
-
-client = OpenAI(
-    base_url="https://router.huggingface.co/v1",
-    api_key=os.environ["HF_TOKEN"],
-)
-
-completion = client.chat.completions.create(
-    model="MiniMaxAI/MiniMax-M3:novita",
-    messages=[...],
-)
+```bash
+cp .env.example .env   # set HF_TOKEN
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+python -m server.app
 ```
 
 ## Scope

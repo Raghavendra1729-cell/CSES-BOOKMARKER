@@ -40,12 +40,30 @@
         <span>Auto-review after submit</span>
       </label>
       <label class="review-field">
-        <span>Local server</span>
-        <input id="review-server" type="text" spellcheck="false" autocomplete="off" placeholder="http://127.0.0.1:8765" />
+        <span>Hugging Face token</span>
+        <input
+          id="review-token"
+          type="password"
+          spellcheck="false"
+          autocomplete="off"
+          placeholder="hf_… paste once, then Save"
+        />
+      </label>
+      <div id="review-token-hint" class="review-token-hint" hidden></div>
+      <label class="review-field">
+        <span>Model</span>
+        <input
+          id="review-model"
+          type="text"
+          spellcheck="false"
+          autocomplete="off"
+          placeholder="MiniMaxAI/MiniMax-M3:novita"
+        />
       </label>
       <div class="review-settings-actions">
         <button type="button" id="review-save" class="ghost-btn">Save</button>
-        <button type="button" id="review-health" class="ghost-btn">Check server</button>
+        <button type="button" id="review-health" class="ghost-btn">Test API</button>
+        <button type="button" id="review-clear-token" class="ghost-btn danger">Clear token</button>
       </div>
       <div id="review-status" class="review-status" hidden></div>
     </section>

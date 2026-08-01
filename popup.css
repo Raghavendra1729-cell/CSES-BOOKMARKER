@@ -389,6 +389,12 @@ body {
   color: var(--danger);
 }
 
+.review-token-hint {
+  margin: -4px 0 8px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
 /* ---------- Footer ---------- */
 .footer {
   border-top: 1px solid var(--border);

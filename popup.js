@@ -300,11 +300,14 @@
     });
   });
 
-  // ---------- AI review settings ----------
+  // ---------- AI review settings (calls HF directly — no local server) ----------
   const reviewEnabled = document.getElementById("review-enabled");
-  const reviewServer = document.getElementById("review-server");
+  const reviewToken = document.getElementById("review-token");
+  const reviewTokenHint = document.getElementById("review-token-hint");
+  const reviewModel = document.getElementById("review-model");
   const reviewSave = document.getElementById("review-save");
   const reviewHealth = document.getElementById("review-health");
+  const reviewClearToken = document.getElementById("review-clear-token");
   const reviewStatus = document.getElementById("review-status");
 
   function setReviewStatus(msg, isError) {
@@ -314,11 +317,27 @@
     reviewStatus.classList.toggle("error", Boolean(isError));
   }
 
+  function applySettingsToUi(s) {
+    if (!s) return;
+    if (reviewEnabled) reviewEnabled.checked = s.enabled !== false;
+    if (reviewModel) reviewModel.value = s.model || "MiniMaxAI/MiniMax-M3:novita";
+    if (reviewTokenHint) {
+      if (s.hasToken) {
+        reviewTokenHint.hidden = false;
+        reviewTokenHint.textContent = "Token saved (" + (s.tokenHint || "••••") + ")";
+        if (reviewToken) reviewToken.placeholder = "Leave blank to keep saved token";
+      } else {
+        reviewTokenHint.hidden = true;
+        reviewTokenHint.textContent = "";
+        if (reviewToken) reviewToken.placeholder = "hf_… paste once, then Save";
+      }
+    }
+  }
+
   function loadReviewSettings() {
     chrome.runtime.sendMessage({ type: "GET_REVIEW_SETTINGS" }, (s) => {
       if (chrome.runtime.lastError || !s) return;
-      if (reviewEnabled) reviewEnabled.checked = s.enabled !== false;
-      if (reviewServer) reviewServer.value = s.serverUrl || "http://127.0.0.1:8765";
+      applySettingsToUi(s);
     });
   }
 
@@ -326,41 +345,65 @@
     reviewSave.addEventListener("click", () => {
       const settings = {
         enabled: reviewEnabled ? reviewEnabled.checked : true,
-        serverUrl: (reviewServer && reviewServer.value.trim()) || "http://127.0.0.1:8765",
+        model:
+          (reviewModel && reviewModel.value.trim()) ||
+          "MiniMaxAI/MiniMax-M3:novita",
       };
+      // Only send token when the user typed something new.
+      if (reviewToken && reviewToken.value.trim()) {
+        settings.hfToken = reviewToken.value.trim();
+      }
       chrome.runtime.sendMessage({ type: "SET_REVIEW_SETTINGS", settings }, (resp) => {
         if (chrome.runtime.lastError) {
           setReviewStatus(chrome.runtime.lastError.message, true);
           return;
         }
-        setReviewStatus(resp && resp.ok ? "Saved." : "Could not save.", !(resp && resp.ok));
+        if (resp && resp.ok) {
+          if (reviewToken) reviewToken.value = "";
+          applySettingsToUi(resp.settings);
+          setReviewStatus(
+            resp.settings && resp.settings.hasToken
+              ? "Saved. Reviews run automatically — no server needed."
+              : "Saved, but no token yet. Paste HF token and Save again.",
+            !(resp.settings && resp.settings.hasToken)
+          );
+        } else {
+          setReviewStatus("Could not save.", true);
+        }
+      });
+    });
+  }
+
+  if (reviewClearToken) {
+    reviewClearToken.addEventListener("click", () => {
+      chrome.runtime.sendMessage({ type: "CLEAR_HF_TOKEN" }, (resp) => {
+        if (chrome.runtime.lastError) {
+          setReviewStatus(chrome.runtime.lastError.message, true);
+          return;
+        }
+        if (reviewToken) reviewToken.value = "";
+        applySettingsToUi(resp && resp.settings);
+        setReviewStatus("Token cleared.", false);
       });
     });
   }
 
   if (reviewHealth) {
     reviewHealth.addEventListener("click", () => {
-      setReviewStatus("Checking…");
+      setReviewStatus("Checking Hugging Face…");
       chrome.runtime.sendMessage({ type: "HEALTH_CHECK" }, (resp) => {
         if (chrome.runtime.lastError) {
           setReviewStatus(chrome.runtime.lastError.message, true);
           return;
         }
         if (!resp || !resp.ok) {
-          setReviewStatus(
-            "Server offline. Run: python -m server.app  (" +
-              ((resp && resp.error) || "unreachable") +
-              ")",
-            true
-          );
+          setReviewStatus((resp && resp.error) || "API check failed", true);
           return;
         }
         const d = resp.data || {};
-        if (!d.has_token) {
-          setReviewStatus("Server up, but HF_TOKEN missing in .env", true);
-          return;
-        }
-        setReviewStatus("OK · " + (d.model || "model set") + " · token present");
+        setReviewStatus(
+          "OK · " + (d.model || "model set") + " · token works (direct HF, no server)"
+        );
       });
     });
   }
