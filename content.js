@@ -142,6 +142,46 @@
     });
 
     initTimerWidget(id, getSolved);
+    maybeShowSavedReviewButton({ problem_id: id, problem_name: name, category });
+  }
+
+  function maybeShowSavedReviewButton(meta) {
+    const panel = globalThis.CSESReviewPanel;
+    if (!panel || !meta || !meta.problem_id) return;
+
+    chrome.runtime.sendMessage(
+      { type: "GET_CACHED_REVIEW", submission: { problem_id: meta.problem_id } },
+      (resp) => {
+        if (chrome.runtime.lastError || !resp || !resp.hit) return;
+
+        // Avoid duplicate buttons
+        if (document.getElementById("csesbm-open-saved-review")) return;
+
+        const btn = document.createElement("button");
+        btn.id = "csesbm-open-saved-review";
+        btn.type = "button";
+        btn.className = "csesbm-open-saved";
+        btn.textContent = "Saved AI review";
+        btn.title = "Open the last AI review for this problem";
+        btn.addEventListener("click", () => {
+          const sub = Object.assign({}, meta, resp.submission || {});
+          panel.renderReview(resp.data, sub, {
+            fromCache: true,
+            savedAt: resp.savedAt || null,
+            onRerun: () => {
+              if (!sub.code || !String(sub.code).trim()) {
+                panel.renderError(
+                  "No saved code. Open a submission result page to run a new review."
+                );
+                return;
+              }
+              requestReview(sub, panel, true);
+            },
+          });
+        });
+        document.body.appendChild(btn);
+      }
+    );
   }
 
   // ---------- Solve timer ----------
@@ -251,7 +291,9 @@
 
   // ---------- AI post-submission review ----------
 
-  function runPostSubmissionReview() {
+  function runPostSubmissionReview(opts) {
+    opts = opts || {};
+    const force = Boolean(opts.force);
     const scrape = globalThis.CSESReviewScrape;
     const panel = globalThis.CSESReviewPanel;
     if (!scrape || !panel) return;
@@ -264,6 +306,10 @@
       return;
     }
 
+    function go(sub) {
+      requestReview(sub, panel, force);
+    }
+
     if (!submission.code || !submission.code.trim()) {
       // Result page may still be loading code; retry briefly.
       setTimeout(() => {
@@ -273,21 +319,31 @@
           return;
         }
         if (!submission.code || !submission.code.trim()) {
+          // Still try cache-only (re-open without code on page)
+          if (!force) {
+            requestReview(submission, panel, false);
+            return;
+          }
           panel.renderError("No source code found on this result page.");
           return;
         }
-        requestReview(submission, panel);
+        go(submission);
       }, 600);
       return;
     }
 
-    requestReview(submission, panel);
+    go(submission);
   }
 
-  function requestReview(submission, panel) {
-    panel.renderLoading();
+  function requestReview(submission, panel, force) {
+    if (force) panel.renderLoading();
+    else {
+      // Prefer instant cache paint when possible
+      panel.renderLoading();
+    }
+
     chrome.runtime.sendMessage(
-      { type: "REVIEW_SUBMISSION", submission },
+      { type: "REVIEW_SUBMISSION", submission, force: Boolean(force) },
       (resp) => {
         if (chrome.runtime.lastError) {
           panel.renderError(chrome.runtime.lastError.message || "Extension error");
@@ -297,7 +353,12 @@
           panel.renderError((resp && resp.error) || "Review failed");
           return;
         }
-        panel.renderReview(resp.data, submission);
+        const sub = submission;
+        panel.renderReview(resp.data, sub, {
+          fromCache: Boolean(resp.fromCache),
+          savedAt: resp.savedAt || null,
+          onRerun: () => runPostSubmissionReview({ force: true }),
+        });
       }
     );
   }
