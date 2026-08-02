@@ -1,5 +1,9 @@
-/* global CSESReviewPrompts, CSESReviewHF, CSESBM_LOCAL_CONFIG */
-importScripts("reviewer/prompts.js", "reviewer/hf-client.js");
+/* global CSESReviewPrompts, CSESReviewHF, CSESBM_LOCAL_CONFIG, CSESReviewCache */
+importScripts(
+  "reviewer/prompts.js",
+  "reviewer/hf-client.js",
+  "reviewer/review-cache.js"
+);
 
 // Optional file-based secrets (config.local.js). Extensions cannot read .env.
 // Missing file is fine — user can still paste token in the popup.
@@ -112,11 +116,33 @@ function maskToken(token) {
   return t.slice(0, 4) + "…" + t.slice(-4);
 }
 
-async function postReview(submission) {
+async function postReview(submission, opts) {
+  opts = opts || {};
+  const force = Boolean(opts.force);
+
   const settings = await getReviewSettings();
   if (!settings.enabled) {
     return { ok: false, error: "AI review is disabled in extension settings." };
   }
+
+  // Serve cache unless force re-run
+  if (!force) {
+    try {
+      const cached = await CSESReviewCache.getCached(submission || {});
+      if (cached && cached.data) {
+        return {
+          ok: true,
+          data: cached.data,
+          fromCache: true,
+          savedAt: cached.savedAt,
+          cacheKey: cached.result_id,
+        };
+      }
+    } catch (_e) {
+      /* fall through to live review */
+    }
+  }
+
   if (!(settings.hfToken || "").trim()) {
     return {
       ok: false,
@@ -132,7 +158,19 @@ async function postReview(submission) {
 
   try {
     const data = await CSESReviewHF.reviewSubmission(settings, submission);
-    return { ok: true, data };
+    let savedAt = Date.now();
+    try {
+      const entry = await CSESReviewCache.save(submission, data);
+      savedAt = entry.savedAt || savedAt;
+    } catch (_e) {
+      /* review still usable if cache write fails */
+    }
+    return {
+      ok: true,
+      data,
+      fromCache: false,
+      savedAt,
+    };
   } catch (e) {
     return {
       ok: false,
@@ -145,8 +183,28 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (!msg || !msg.type) return;
 
   if (msg.type === "REVIEW_SUBMISSION") {
-    postReview(msg.submission || {})
+    postReview(msg.submission || {}, { force: Boolean(msg.force) })
       .then(sendResponse)
+      .catch((e) => sendResponse({ ok: false, error: String(e) }));
+    return true;
+  }
+
+  if (msg.type === "GET_CACHED_REVIEW") {
+    CSESReviewCache.getCached(msg.submission || { result_id: msg.resultId, problem_id: msg.problemId })
+      .then((cached) => {
+        if (!cached || !cached.data) {
+          sendResponse({ ok: true, hit: false });
+          return;
+        }
+        sendResponse({
+          ok: true,
+          hit: true,
+          data: cached.data,
+          submission: cached.submission,
+          savedAt: cached.savedAt,
+          result_id: cached.result_id,
+        });
+      })
       .catch((e) => sendResponse({ ok: false, error: String(e) }));
     return true;
   }
