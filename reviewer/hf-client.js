@@ -10,7 +10,8 @@
     baseUrl: "https://router.huggingface.co/v1",
     model: "MiniMaxAI/MiniMax-M3:novita",
     // Need headroom for reasoning + JSON answer (400 is too small → empty content).
-    maxTokens: 2048,
+    // Room for reasoning + short JSON + 1–2 code snippets on AC.
+    maxTokens: 3072,
   };
 
   const MAX_RETRIES = 3;
@@ -85,6 +86,7 @@
     // Clamp floor for reasoning models so we never re-hit empty-content.
     // Empirically max_tokens=400 → 399 reasoning + empty content on MiniMax-M3.
     if (maxTokens < 2048) maxTokens = 2048;
+    if (maxTokens < 3072) maxTokens = 3072;
 
     const token = (settings.hfToken || "").trim();
     if (!token) {
