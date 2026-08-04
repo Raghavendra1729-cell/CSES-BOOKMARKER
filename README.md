@@ -59,7 +59,7 @@ CSES result page
   → POST https://router.huggingface.co/v1/chat/completions
        Authorization: Bearer <token from chrome.storage>
        model: MiniMaxAI/MiniMax-M3:novita
-  → review panel (green = AC, red = rejected)
+  → quick review panel (then detailed hints or approaches)
 ```
 
 Same API shape as:
@@ -89,17 +89,14 @@ Clear the token anytime with **Clear token** in the popup.
 
 ### Rejected (WA / TLE / MLE / RE / CE)
 
-- Verdict summary  
-- Weaknesses only (no fixes)  
-- Tiny non-algorithmic hint  
-- Approach score + category stars  
+- Fast diagnosis, evidence and complexity
+- Layered hints only — never code, pseudocode, corrections, or algorithm names
 
 ### Accepted
 
-- Code quality notes  
-- Complexity  
-- Optimal? + alternative approach **names** only  
-- Ratings + improvement checklist  
+- Immediate correctness/quality/complexity summary
+- 2–4 collapsible practical approaches with proof, trade-offs and complete code
+- Separate fast and detailed models in the popup; quick model defaults to `:fastest`
 
 ## Optional local Python server
 

@@ -28,6 +28,10 @@ app.add_middleware(
 
 
 class ReviewRequest(BaseModel):
+    stage: str = "summary"
+    requestId: str | None = None
+    schemaVersion: int = 2
+    force: bool = False
     problem_id: str | None = None
     problem_name: str | None = None
     category: str | None = None
@@ -66,7 +70,8 @@ def review(req: ReviewRequest):
         raise HTTPException(status_code=400, detail="No submitted code provided.")
 
     try:
-        return review_submission(req.model_dump())
+        data = review_submission(req.model_dump(), req.stage)
+        return {"ok": True, "stage": req.stage, "data": data, "fromCache": False}
     except HTTPException:
         raise
     except Exception as e:

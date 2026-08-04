@@ -3,8 +3,7 @@
 // config.local.js is gitignored. Never commit it.
 self.CSESBM_LOCAL_CONFIG = {
   hfToken: "hf_your_token_here",
-  model: "MiniMaxAI/MiniMax-M3:novita",
+  summaryModel: "Qwen/Qwen2.5-Coder-32B-Instruct:fastest",
+  detailModel: "MiniMaxAI/MiniMax-M3:novita",
   baseUrl: "https://router.huggingface.co/v1",
-  // MiniMax reasoning needs headroom; 400 causes empty responses.
-  maxTokens: 2048,
 };

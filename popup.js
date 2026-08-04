@@ -304,7 +304,8 @@
   const reviewEnabled = document.getElementById("review-enabled");
   const reviewToken = document.getElementById("review-token");
   const reviewTokenHint = document.getElementById("review-token-hint");
-  const reviewModel = document.getElementById("review-model");
+  const reviewSummaryModel = document.getElementById("review-summary-model");
+  const reviewDetailModel = document.getElementById("review-detail-model");
   const reviewSave = document.getElementById("review-save");
   const reviewHealth = document.getElementById("review-health");
   const reviewClearToken = document.getElementById("review-clear-token");
@@ -320,7 +321,8 @@
   function applySettingsToUi(s) {
     if (!s) return;
     if (reviewEnabled) reviewEnabled.checked = s.enabled !== false;
-    if (reviewModel) reviewModel.value = s.model || "MiniMaxAI/MiniMax-M3:novita";
+    if (reviewSummaryModel) reviewSummaryModel.value = s.summaryModel || "Qwen/Qwen2.5-Coder-32B-Instruct:fastest";
+    if (reviewDetailModel) reviewDetailModel.value = s.detailModel || "MiniMaxAI/MiniMax-M3:novita";
     if (reviewTokenHint) {
       if (s.hasToken) {
         reviewTokenHint.hidden = false;
@@ -353,9 +355,8 @@
     reviewSave.addEventListener("click", () => {
       const settings = {
         enabled: reviewEnabled ? reviewEnabled.checked : true,
-        model:
-          (reviewModel && reviewModel.value.trim()) ||
-          "MiniMaxAI/MiniMax-M3:novita",
+        summaryModel: (reviewSummaryModel && reviewSummaryModel.value.trim()) || "Qwen/Qwen2.5-Coder-32B-Instruct:fastest",
+        detailModel: (reviewDetailModel && reviewDetailModel.value.trim()) || "MiniMaxAI/MiniMax-M3:novita",
       };
       // Only send token when the user typed something new.
       if (reviewToken && reviewToken.value.trim()) {

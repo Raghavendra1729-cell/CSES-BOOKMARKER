@@ -59,12 +59,12 @@ def _extract_json(text: str) -> dict[str, Any]:
         raise
 
 
-def review_submission(payload: dict[str, Any]) -> dict[str, Any]:
+def review_submission(payload: dict[str, Any], stage: str = "summary") -> dict[str, Any]:
     """Call HF router once (retry only on transient API failures)."""
     client = _client()
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": build_user_prompt(payload)},
+        {"role": "user", "content": _stage_prompt(payload, stage)},
     ]
 
     last_err: Exception | None = None
@@ -73,7 +73,7 @@ def review_submission(payload: dict[str, Any]) -> dict[str, Any]:
             completion = client.chat.completions.create(
                 model=_model(),
                 messages=messages,
-                max_tokens=_max_tokens(),
+                max_tokens=900 if stage == "summary" else (7000 if payload.get("accepted") else 1800),
                 temperature=0.2,
             )
             raw = completion.choices[0].message.content or ""
@@ -106,3 +106,18 @@ def review_submission(payload: dict[str, Any]) -> dict[str, Any]:
             time.sleep(BACKOFF_BASE_S * (2**attempt))
 
     raise RuntimeError(str(last_err) if last_err else "Review failed")
+
+
+def _stage_prompt(payload: dict[str, Any], stage: str) -> str:
+    """Python API mirrors the extension stage fields; router strict mode is optional."""
+    accepted = bool(payload.get("accepted"))
+    if stage == "summary":
+        schema = '{"diagnosis":"string","evidence":["string"],"complexity":{"time":"O(...) ","space":"O(...)"},"first_hint":"string","optimality":"string","code_quality":["string"]}'
+        task = "Fast summary. " + ("Assess correctness, quality and optimality." if accepted else "Hints only: no algorithm names, fixes, logic, pseudocode, or code.")
+    elif accepted:
+        schema = '{"improvements":["string"],"approaches":[{"name":"string","idea":"string","steps":["string","string"],"correctness":"string","time_complexity":"O(...) ","space_complexity":"O(...) ","tradeoffs":"string","code":"complete code"}]}'
+        task = "Give 2-4 distinct practical approaches with complete code in the submitted language."
+    else:
+        schema = '{"critique":["string"],"hints":["string"]}'
+        task = "Deeper hints only. Never algorithm names, corrected logic, pseudocode, solution steps, or code."
+    return build_user_prompt(payload) + "\n\nStage: " + stage + "\n" + task + "\nReturn this JSON shape exactly:\n" + schema

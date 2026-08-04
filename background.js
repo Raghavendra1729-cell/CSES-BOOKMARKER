@@ -1,5 +1,6 @@
 /* global CSESReviewPrompts, CSESReviewHF, CSESBM_LOCAL_CONFIG, CSESReviewCache */
 importScripts(
+  "reviewer/schema.js",
   "reviewer/prompts.js",
   "reviewer/hf-client.js",
   "reviewer/review-cache.js"
@@ -19,14 +20,17 @@ try {
 
 const PREFIX = "csesbm:";
 const REVIEW_SETTINGS_KEY = "csesbm:reviewSettings";
+const REVIEW_METRICS_KEY = "csesbm:reviewMetrics";
 
 const DEFAULT_REVIEW_SETTINGS = {
   enabled: true,
   hfToken: "",
   baseUrl: CSESReviewHF.DEFAULTS.baseUrl,
-  model: CSESReviewHF.DEFAULTS.model,
-  maxTokens: CSESReviewHF.DEFAULTS.maxTokens,
+  summaryModel: CSESReviewHF.DEFAULTS.summaryModel,
+  detailModel: CSESReviewHF.DEFAULTS.detailModel,
 };
+const activeReviews = new Map();
+const problemContextCache = new Map();
 
 function recount() {
   chrome.storage.sync.get(null, (all) => {
@@ -57,6 +61,9 @@ function fileToken() {
 function mergeSettings(stored) {
   const s = { ...DEFAULT_REVIEW_SETTINGS, ...(stored || {}) };
 
+  // v1 used one `model`; preserve it as the detailed model on upgrade.
+  if (stored && stored.model && !stored.detailModel) s.detailModel = String(stored.model).trim();
+
   // File config fills gaps; popup/storage wins if set.
   if (!(s.hfToken || "").trim() && fileToken()) {
     s.hfToken = fileToken();
@@ -67,23 +74,13 @@ function mergeSettings(stored) {
     s._tokenSource = "none";
   }
 
-  if (!(s.model || "").trim() && FILE_CONFIG.model) {
-    s.model = String(FILE_CONFIG.model).trim();
+  if (!(s.detailModel || "").trim() && (FILE_CONFIG.detailModel || FILE_CONFIG.model)) {
+    s.detailModel = String(FILE_CONFIG.detailModel || FILE_CONFIG.model).trim();
   }
+  if (!(s.summaryModel || "").trim() && FILE_CONFIG.summaryModel) s.summaryModel = String(FILE_CONFIG.summaryModel).trim();
   if (!(s.baseUrl || "").trim() && FILE_CONFIG.baseUrl) {
     s.baseUrl = String(FILE_CONFIG.baseUrl).trim();
   }
-  if (FILE_CONFIG.maxTokens) {
-    const fileMax = Number(FILE_CONFIG.maxTokens);
-    // Prefer higher budget (reasoning models need headroom).
-    if (fileMax && (!s.maxTokens || fileMax > s.maxTokens)) {
-      s.maxTokens = fileMax;
-    }
-  }
-  if (!s.maxTokens || s.maxTokens < 2048) {
-    s.maxTokens = Math.max(Number(s.maxTokens) || 0, DEFAULT_REVIEW_SETTINGS.maxTokens, 2048);
-  }
-
   return s;
 }
 
@@ -92,6 +89,15 @@ function getReviewSettings() {
     chrome.storage.local.get(REVIEW_SETTINGS_KEY, (res) => {
       resolve(mergeSettings(res[REVIEW_SETTINGS_KEY]));
     });
+  });
+}
+
+function recordMetric(metric) {
+  chrome.storage.local.get(REVIEW_METRICS_KEY, (res) => {
+    const rows = Array.isArray(res[REVIEW_METRICS_KEY]) ? res[REVIEW_METRICS_KEY] : [];
+    // Intentionally no problem id, submission id, statement, or source code.
+    rows.push({ at: Date.now(), ...metric });
+    chrome.storage.local.set({ [REVIEW_METRICS_KEY]: rows.slice(-100) });
   });
 }
 
@@ -104,8 +110,8 @@ function sanitizeSettingsForClient(s) {
     tokenSource: hasToken ? s._tokenSource || "unknown" : "none",
     hasFileConfig: Boolean(fileToken()),
     baseUrl: s.baseUrl || DEFAULT_REVIEW_SETTINGS.baseUrl,
-    model: s.model || DEFAULT_REVIEW_SETTINGS.model,
-    maxTokens: s.maxTokens || DEFAULT_REVIEW_SETTINGS.maxTokens,
+    summaryModel: s.summaryModel || DEFAULT_REVIEW_SETTINGS.summaryModel,
+    detailModel: s.detailModel || DEFAULT_REVIEW_SETTINGS.detailModel,
   };
 }
 
@@ -116,34 +122,65 @@ function maskToken(token) {
   return t.slice(0, 4) + "…" + t.slice(-4);
 }
 
+async function fetchProblemContext(submission, signal) {
+  if (submission.problem_statement && submission.constraints) return submission;
+  if (!submission.problem_id) return submission;
+  const remembered = problemContextCache.get(String(submission.problem_id));
+  if (remembered) return { ...submission, ...remembered };
+  const res = await fetch("https://cses.fi/problemset/task/" + encodeURIComponent(submission.problem_id), { signal });
+  if (!res.ok) throw new Error("Could not read the CSES problem statement (HTTP " + res.status + ").");
+  const html = await res.text();
+  const source = (html.match(/<div class="task-content">([\s\S]*?)<\/div>\s*<\/div>/i) || [null, html])[1];
+  const plain = source.replace(/<\/(?:p|h[1-6]|li|pre|div)>/gi, "\n").replace(/<br\s*\/?>/gi, "\n").replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&").replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+  const chunks = plain.split(/\n(?=(?:Input|Output|Constraints|Example|Sample|Time limit|Memory limit))/i);
+  const take = (name) => chunks.filter((x) => new RegExp("^" + name, "i").test(x.trim())).join("\n\n");
+  submission.problem_statement = plain.slice(0, 11000);
+  submission.constraints = take("Constraints|Time limit|Memory limit").slice(0, 2400) || submission.time_limit || "Not explicitly listed";
+  submission.samples = take("Example|Sample").slice(0, 2400) || "Not explicitly listed";
+  problemContextCache.set(String(submission.problem_id), { problem_statement: submission.problem_statement, constraints: submission.constraints, samples: submission.samples });
+  return submission;
+}
+
 async function postReview(submission, opts) {
   opts = opts || {};
   const force = Boolean(opts.force);
+  const stage = opts.stage === "detail" ? "detail" : "summary";
+  const requestId = opts.requestId || crypto.randomUUID();
+  const controller = new AbortController();
+  activeReviews.set(requestId, controller);
+  const startedAt = Date.now();
 
   const settings = await getReviewSettings();
   if (!settings.enabled) {
+    activeReviews.delete(requestId);
     return { ok: false, error: "AI review is disabled in extension settings." };
   }
 
-  // Serve cache unless force re-run
+  // Cache stages independently. Old entries remain usable as a legacy summary.
   if (!force) {
     try {
       const cached = await CSESReviewCache.getCached(submission || {});
-      if (cached && cached.data) {
+      const review = cached && cached.data;
+      const cachedStage = review && (stage === "summary" ? review.summary : review.detail);
+      if (cachedStage) {
+        activeReviews.delete(requestId);
         return {
           ok: true,
-          data: cached.data,
+          data: cachedStage,
+          stage,
           fromCache: true,
           savedAt: cached.savedAt,
-          cacheKey: cached.result_id,
+          timing: review.timing && review.timing[stage],
         };
       }
+      if (stage === "summary" && review && review.verdict_summary) { activeReviews.delete(requestId); return { ok: true, data: review, stage, fromCache: true, savedAt: cached.savedAt, legacy: true }; }
     } catch (_e) {
       /* fall through to live review */
     }
   }
 
   if (!(settings.hfToken || "").trim()) {
+    activeReviews.delete(requestId);
     return {
       ok: false,
       error:
@@ -153,29 +190,48 @@ async function postReview(submission, opts) {
     };
   }
   if (!(submission && String(submission.code || "").trim())) {
+    activeReviews.delete(requestId);
     return { ok: false, error: "No submitted code provided." };
   }
 
   try {
-    const data = await CSESReviewHF.reviewSubmission(settings, submission);
+    const full = await fetchProblemContext({ ...submission }, controller.signal);
+    const hfStage = stage === "summary" ? "summary" : full.accepted ? "acceptedDetails" : "rejectedDetails";
+    let result = await CSESReviewHF.reviewStage(settings, full, hfStage, { controller, startedAt });
+    let data = result.data;
+    let validation = { status: "passed", repaired: false };
+    if (hfStage === "acceptedDetails" && data._validationProblem) {
+      const issue = data._validationProblem; delete data._validationProblem;
+      data = await CSESReviewHF.repairAccepted(settings, full, data, issue, { controller });
+      validation = { status: "repaired", repaired: true, issue };
+    }
+    data.validation = validation;
     let savedAt = Date.now();
     try {
-      const entry = await CSESReviewCache.save(submission, data);
+      const entry = await CSESReviewCache.saveStage(full, stage, data, result.timing);
       savedAt = entry.savedAt || savedAt;
     } catch (_e) {
       /* review still usable if cache write fails */
     }
+    recordMetric({ stage, failureType: null, retryCount: result.timing.retryCount, model: result.timing.model, ms: result.timing.ms });
     return {
       ok: true,
       data,
+      stage,
+      timing: result.timing,
       fromCache: false,
       savedAt,
     };
   } catch (e) {
+    recordMetric({ stage, failureType: (e && e.failureType) || "unknown", retryCount: 0, model: stage === "summary" ? settings.summaryModel : settings.detailModel });
     return {
       ok: false,
       error: (e && e.message) || "Review failed",
+      stage,
+      failureType: (e && e.failureType) || "unknown",
     };
+  } finally {
+    activeReviews.delete(requestId);
   }
 }
 
@@ -183,10 +239,17 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (!msg || !msg.type) return;
 
   if (msg.type === "REVIEW_SUBMISSION") {
-    postReview(msg.submission || {}, { force: Boolean(msg.force) })
+    postReview(msg.submission || {}, { force: Boolean(msg.force), stage: msg.stage, requestId: msg.requestId })
       .then(sendResponse)
       .catch((e) => sendResponse({ ok: false, error: String(e) }));
     return true;
+  }
+
+  if (msg.type === "CANCEL_REVIEW") {
+    const controller = activeReviews.get(msg.requestId);
+    if (controller) controller.abort();
+    sendResponse({ ok: true });
+    return;
   }
 
   if (msg.type === "GET_CACHED_REVIEW") {
@@ -229,15 +292,8 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
             stored.baseUrl ||
             DEFAULT_REVIEW_SETTINGS.baseUrl
           ).trim(),
-          model: (
-            incoming.model ||
-            stored.model ||
-            DEFAULT_REVIEW_SETTINGS.model
-          ).trim(),
-          maxTokens:
-            Number(incoming.maxTokens) ||
-            stored.maxTokens ||
-            DEFAULT_REVIEW_SETTINGS.maxTokens,
+          summaryModel: (incoming.summaryModel || stored.summaryModel || DEFAULT_REVIEW_SETTINGS.summaryModel).trim(),
+          detailModel: (incoming.detailModel || stored.detailModel || stored.model || DEFAULT_REVIEW_SETTINGS.detailModel).trim(),
           hfToken: stored.hfToken || "",
         };
 
@@ -292,7 +348,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
           sendResponse({
             ok: false,
             error: "HF rejected the token (HTTP " + resp.status + ").",
-            model: settings.model,
+            model: settings.detailModel,
             tokenSource: settings._tokenSource,
           });
           return;
@@ -301,7 +357,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
           ok: true,
           data: {
             has_token: true,
-            model: settings.model,
+            model: settings.detailModel,
             base_url: base,
             http_status: resp.status,
             token_source: settings._tokenSource,
@@ -311,7 +367,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         sendResponse({
           ok: false,
           error: (e && e.message) || "Cannot reach Hugging Face router",
-          model: settings.model,
+          model: settings.detailModel,
         });
       }
     });

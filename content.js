@@ -165,9 +165,9 @@
         btn.title = "Open the last AI review for this problem";
         btn.addEventListener("click", () => {
           const sub = Object.assign({}, meta, resp.submission || {});
-          panel.renderReview(resp.data, sub, {
-            fromCache: true,
-            savedAt: resp.savedAt || null,
+          const cached = resp.data && resp.data.summary ? resp.data : { summary: resp.data, detail: null };
+          panel.renderSummary(cached.summary, sub, {
+            detail: cached.detail,
             onRerun: () => {
               if (!sub.code || !String(sub.code).trim()) {
                 panel.renderError(
@@ -335,32 +335,29 @@
     go(submission);
   }
 
+  let activeRequestId = null;
+  function cancelReview() {
+    if (activeRequestId) chrome.runtime.sendMessage({ type: "CANCEL_REVIEW", requestId: activeRequestId });
+    activeRequestId = null;
+  }
   function requestReview(submission, panel, force) {
-    if (force) panel.renderLoading();
-    else {
-      // Prefer instant cache paint when possible
-      panel.renderLoading();
-    }
-
-    chrome.runtime.sendMessage(
-      { type: "REVIEW_SUBMISSION", submission, force: Boolean(force) },
-      (resp) => {
-        if (chrome.runtime.lastError) {
-          panel.renderError(chrome.runtime.lastError.message || "Extension error");
-          return;
-        }
-        if (!resp || !resp.ok) {
-          panel.renderError((resp && resp.error) || "Review failed");
-          return;
-        }
-        const sub = submission;
-        panel.renderReview(resp.data, sub, {
-          fromCache: Boolean(resp.fromCache),
-          savedAt: resp.savedAt || null,
-          onRerun: () => runPostSubmissionReview({ force: true }),
+    cancelReview();
+    const summaryId = crypto.randomUUID(); activeRequestId = summaryId;
+    panel.renderLoading("Reading problem…", { onClose: cancelReview });
+    chrome.runtime.sendMessage({ type: "REVIEW_SUBMISSION", submission, force: Boolean(force), stage: "summary", requestId: summaryId, schemaVersion: 2 }, (resp) => {
+      if (activeRequestId !== summaryId) return;
+      if (chrome.runtime.lastError || !resp || !resp.ok) { panel.renderError((chrome.runtime.lastError && chrome.runtime.lastError.message) || (resp && resp.error) || "Review failed", { onClose: cancelReview }); return; }
+      const show = (detail, detailError, detailLoading) => panel.renderSummary(resp.data, submission, { detail, detailError, detailLoading, onClose: cancelReview, onRetryDetail: () => loadDetail(true) });
+      const loadDetail = (detailForce) => {
+        const detailId = crypto.randomUUID(); activeRequestId = detailId; show(null, null, true);
+        chrome.runtime.sendMessage({ type: "REVIEW_SUBMISSION", submission, force: Boolean(detailForce), stage: "detail", requestId: detailId, schemaVersion: 2 }, (detailResp) => {
+          if (activeRequestId !== detailId) return;
+          if (chrome.runtime.lastError || !detailResp || !detailResp.ok) { show(null, (detailResp && detailResp.error) || "Details timed out. Your quick review is still available.", false); return; }
+          show(detailResp.data, null, false);
         });
-      }
-    );
+      };
+      show(null, null, true); loadDetail(false);
+    });
   }
 
   function init() {

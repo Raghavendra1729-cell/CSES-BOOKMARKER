@@ -55,14 +55,18 @@
       </label>
       <div id="review-token-hint" class="review-token-hint" hidden></div>
       <label class="review-field">
-        <span>Model</span>
+        <span>Quick-review model</span>
         <input
-          id="review-model"
+          id="review-summary-model"
           type="text"
           spellcheck="false"
           autocomplete="off"
-          placeholder="MiniMaxAI/MiniMax-M3:novita"
+          placeholder="Qwen/Qwen2.5-Coder-32B-Instruct:fastest"
         />
+      </label>
+      <label class="review-field">
+        <span>Detailed-review model</span>
+        <input id="review-detail-model" type="text" spellcheck="false" autocomplete="off" placeholder="MiniMaxAI/MiniMax-M3:novita" />
       </label>
       <div class="review-settings-actions">
         <button type="button" id="review-save" class="ghost-btn">Save</button>
