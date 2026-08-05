@@ -1,125 +1,50 @@
-// Strict reviewer prompts — never solve on rejects; teach on accepted.
-// Loaded by the service worker via importScripts.
 (function (global) {
-  const SYSTEM_PROMPT = `You are a post-submission CSES code reviewer (not a chatbot).
+  const SYSTEM_PROMPT = `You are a precise CSES post-submission code reviewer. Return only valid JSON with exactly the requested fields. Use only the supplied statement, constraints, verdict and source code.
 
-RULES BY OUTCOME:
-- accepted=false: NEVER solution, algorithm name, pseudocode, or fix code. Microscopic thinking hints only.
-- accepted=true: User already solved it. Teach. Show better approaches WITH short working code in their language when useful.
+For a rejected submission, protect the learning process: give one microscopic observational hint only. Never name the intended algorithm, provide corrected logic, pseudocode, steps, or code.
 
-READABILITY (critical):
-- Write for fast scanning. Short lines. No essays. No filler. No motivation.
-- Every bullet ≤ 12 words when possible.
-- Prefer punchy fragments over full paragraphs.
-- Max 3 bullets per list unless teaching an alternate (then 1–2 approaches max).
-- verdict_summary: one short line.
-- approach_reason / why fields: ≤ 15 words.
+For an accepted submission, review correctness and complexity, then provide 1-4 genuinely useful alternative implementations that are more efficient, simpler, or have a meaningful trade-off. Every alternative must include complete compilable code in the submitted language. Do not pad the list with inferior duplicates.`;
 
-Tone: senior competitive programmer. Direct. Dense. No markdown fences outside JSON strings.
+  function context(payload) {
+    return [
+      `Problem: ${payload.problem_name || "unknown"} (id=${payload.problem_id || "?"})`,
+      `Language: ${payload.language || "unknown"}`,
+      `Verdict: ${payload.verdict || "Unknown"}`,
+      `Accepted: ${Boolean(payload.accepted)}`,
+      `Statement:\n${String(payload.problem_statement || "Unavailable").slice(0, 7000)}`,
+      `Constraints:\n${String(payload.constraints || "Unavailable").slice(0, 1800)}`,
+      `Samples:\n${String(payload.samples || "Unavailable").slice(0, 1800)}`,
+      `Submitted code:\n${String(payload.code || "").slice(0, 14000)}`,
+    ].join("\n\n");
+  }
 
-Respond with ONLY valid JSON for the schema. No prose outside JSON.`;
-
-  function schemaRejected() {
-    return `{
-  "verdict_summary": "Wrong Answer on test N.",
-  "code_review": ["short weakness 1", "short weakness 2", "short weakness 3"],
-  "tiny_hint": "One or two short sentences. No algorithm names.",
-  "approach_quality": 0.0,
-  "approach_reason": "≤15 words.",
-  "categories": { "correctness": 1, "efficiency": 1, "readability": 1, "implementation": 1 }
+  function buildPrompt(payload) {
+    if (!payload.accepted) {
+      return context(payload) + `\n\nReturn exactly this JSON shape:\n{
+  "verdict_summary": "one short sentence",
+  "tiny_hint": "one small observational hint, at most two short sentences"
 }`;
+    }
+    return context(payload) + `\n\nReturn exactly this JSON shape:\n{
+  "verdict_summary": "short assessment",
+  "current_analysis": {
+    "correctness": "short explanation",
+    "time_complexity": "O(...) with a short reason",
+    "space_complexity": "O(...) with a short reason",
+    "is_optimal": true
+  },
+  "code_quality": ["specific concise note"],
+  "improvements": ["specific concise improvement"],
+  "approaches": [{
+    "name": "approach name",
+    "idea": "concise explanation",
+    "time_complexity": "O(...) ",
+    "space_complexity": "O(...) ",
+    "tradeoffs": "when this is better or worse",
+    "code": "complete compilable ${payload.language || "submitted-language"} code"
+  }]
+}\nInclude only alternatives that are actually useful. If the submitted approach is already optimal, give a simpler or equally optimal alternative with a real trade-off.`;
   }
 
-  function schemaAccepted() {
-    return `{
-  "verdict_summary": "Accepted.",
-  "code_quality": ["short note", "short note"],
-  "time_complexity": "O(...)",
-  "space_complexity": "O(...)",
-  "is_optimal": false,
-  "better_approaches": [
-    {
-      "name": "Approach name",
-      "why": "Why better, ≤15 words.",
-      "complexity": "O(...) time, O(...) space",
-      "code": "short complete-ish snippet in the user's language, focused core only, not a novel"
-    }
-  ],
-  "ratings": { "algorithm": 0.0, "code_quality": 0.0, "overall": 0.0 },
-  "improvements": ["short polish item", "short polish item"]
-}`;
-  }
-
-  function buildUserPrompt(payload) {
-    const accepted = Boolean(payload && payload.accepted);
-    const lang = (payload && payload.language) || "unknown";
-    const parts = [
-      "Problem: " +
-        ((payload && payload.problem_name) || "unknown") +
-        " (id=" +
-        ((payload && payload.problem_id) || "?") +
-        ")",
-      "Category: " + ((payload && payload.category) || "unknown"),
-      "Language: " + lang,
-      "Verdict: " + ((payload && payload.verdict) || "Unknown"),
-      "Accepted: " + (accepted ? "true" : "false"),
-    ];
-
-    if (payload && payload.failed_test != null) {
-      parts.push("Failed test: " + payload.failed_test);
-    }
-    if (payload && payload.time_ms != null) {
-      parts.push("Time: " + payload.time_ms + " ms");
-    }
-    if (payload && payload.memory_kb != null) {
-      parts.push("Memory: " + payload.memory_kb + " KB");
-    }
-
-    const stmt =
-      payload && payload.problem_statement
-        ? String(payload.problem_statement).trim()
-        : "";
-    if (stmt) {
-      parts.push("Problem statement (truncated):\n" + stmt.slice(0, 2000));
-    }
-
-    const code =
-      payload && payload.code ? String(payload.code).trim().slice(0, 10000) : "";
-    parts.push("Submitted code:\n```\n" + code + "\n```");
-
-    if (!accepted) {
-      parts.push(
-        "Task: REJECTED review. Ultra-short output.\n" +
-          "- verdict_summary: one line\n" +
-          "- code_review: MAX 3 bullets, each ≤12 words, weaknesses only, no fixes\n" +
-          "- tiny_hint: 1 short sentence, no algorithm names\n" +
-          "- approach_reason: ≤15 words\n" +
-          "- categories 1-5"
-      );
-    } else {
-      parts.push(
-        "Task: ACCEPTED review. Teach clearly, stay scannable.\n" +
-          "- code_quality: MAX 3 bullets, ≤12 words each\n" +
-          "- improvements: MAX 3 polish bullets\n" +
-          "- complexities: short strings\n" +
-          "- If a better approach exists: better_approaches with 1–2 items.\n" +
-          "  Each: name, why (≤15 words), complexity, code snippet in " +
-          lang +
-          " (core only, ~15–40 lines max, readable, compilable-ish).\n" +
-          "- If already best common approach: is_optimal=true and better_approaches=[]\n" +
-          "- Prefer teaching a cleaner/faster standard approach over repeating their code\n" +
-          "- Do NOT dump walls of text"
-      );
-    }
-
-    parts.push(
-      "JSON schema:\n" + (accepted ? schemaAccepted() : schemaRejected())
-    );
-    return parts.join("\n\n");
-  }
-
-  global.CSESReviewPrompts = {
-    SYSTEM_PROMPT,
-    buildUserPrompt,
-  };
+  global.CSESReviewPrompts = { SYSTEM_PROMPT, buildPrompt };
 })(typeof self !== "undefined" ? self : globalThis);

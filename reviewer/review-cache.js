@@ -115,6 +115,7 @@
       problem_id: sub.problem_id,
       savedAt: Date.now(),
       submission: sub,
+      schemaVersion: (global.CSESReviewSchema && global.CSESReviewSchema.VERSION) || 1,
       data: data,
     };
 

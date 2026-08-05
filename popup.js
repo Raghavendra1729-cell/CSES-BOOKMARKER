@@ -44,7 +44,7 @@
     tabsEl.querySelector('[data-count="todo"]').textContent = c.todo;
     tabsEl.querySelector('[data-count="done"]').textContent = c.done;
     clearBtn.hidden = c.all === 0;
-    exportBtn.disabled = c.all === 0;
+    exportBtn.disabled = false;
     if (c.all === 0) {
       sublineEl.textContent = "";
     } else {
@@ -207,15 +207,36 @@
     return String(n).padStart(2, "0");
   }
 
-  function exportBookmarks() {
+  function localGetAll() {
+    return new Promise((resolve) => chrome.storage.local.get(null, (all) => resolve(all || {})));
+  }
+
+  function localSet(values) {
+    return new Promise((resolve, reject) => chrome.storage.local.set(values, () => {
+      const error = chrome.runtime.lastError;
+      if (error) reject(error);
+      else resolve();
+    }));
+  }
+
+  function isPortableLocalKey(key) {
+    return key.startsWith("csesbm:rev:r:") || key.startsWith("csesbm:rev:p:") || key.startsWith("csesbm-timer:");
+  }
+
+  async function exportBookmarks() {
     const all = Object.values(map);
-    if (all.length === 0) return;
+    const storedLocal = await localGetAll();
+    const localData = {};
+    Object.keys(storedLocal).filter(isPortableLocalKey).forEach((key) => {
+      localData[key] = storedLocal[key];
+    });
     const now = new Date();
     const payload = {
       app: "cses-bookmarker",
-      version: 1,
+      version: 2,
       exportedAt: now.toISOString(),
       bookmarks: all,
+      localData,
     };
     const blob = new Blob([JSON.stringify(payload, null, 2)], {
       type: "application/json",
@@ -224,12 +245,12 @@
     const stamp = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
     const a = document.createElement("a");
     a.href = url;
-    a.download = `cses-bookmarks-${stamp}.json`;
+    a.download = `cses-bookmarker-backup-${stamp}.json`;
     document.body.appendChild(a);
     a.click();
     a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
-    flash(`Exported ${all.length} bookmark${all.length === 1 ? "" : "s"}.`);
+    flash(`Backup saved · ${all.length} bookmark${all.length === 1 ? "" : "s"}.`);
   }
 
   async function importBookmarks(file) {
@@ -246,8 +267,15 @@
         map[saved.id] = saved;
         n += 1;
       }
+      if (data && data.localData && typeof data.localData === "object") {
+        const portable = {};
+        Object.keys(data.localData).filter(isPortableLocalKey).forEach((key) => {
+          portable[key] = data.localData[key];
+        });
+        if (Object.keys(portable).length) await localSet(portable);
+      }
       render();
-      flash(`Imported ${n} bookmark${n === 1 ? "" : "s"}.`);
+      flash(`Restored ${n} bookmark${n === 1 ? "" : "s"} and local review data.`);
     } catch (e) {
       flash("Import failed — not a valid backup file.", true);
     }
@@ -301,10 +329,8 @@
   });
 
   // ---------- AI review settings (calls HF directly — no local server) ----------
-  const reviewEnabled = document.getElementById("review-enabled");
   const reviewToken = document.getElementById("review-token");
   const reviewTokenHint = document.getElementById("review-token-hint");
-  const reviewModel = document.getElementById("review-model");
   const reviewSave = document.getElementById("review-save");
   const reviewHealth = document.getElementById("review-health");
   const reviewClearToken = document.getElementById("review-clear-token");
@@ -319,17 +345,11 @@
 
   function applySettingsToUi(s) {
     if (!s) return;
-    if (reviewEnabled) reviewEnabled.checked = s.enabled !== false;
-    if (reviewModel) reviewModel.value = s.model || "MiniMaxAI/MiniMax-M3:novita";
     if (reviewTokenHint) {
       if (s.hasToken) {
         reviewTokenHint.hidden = false;
         const src =
-          s.tokenSource === "config.local.js"
-            ? "from config.local.js"
-            : s.tokenSource === "popup"
-              ? "from popup storage"
-              : "loaded";
+          s.tokenSource === "popup" ? "from popup storage" : "loaded";
         reviewTokenHint.textContent =
           "Token ready (" + (s.tokenHint || "••••") + ", " + src + ")";
         if (reviewToken) reviewToken.placeholder = "Leave blank to keep current token";
@@ -352,10 +372,7 @@
   if (reviewSave) {
     reviewSave.addEventListener("click", () => {
       const settings = {
-        enabled: reviewEnabled ? reviewEnabled.checked : true,
-        model:
-          (reviewModel && reviewModel.value.trim()) ||
-          "MiniMaxAI/MiniMax-M3:novita",
+        enabled: true,
       };
       // Only send token when the user typed something new.
       if (reviewToken && reviewToken.value.trim()) {
