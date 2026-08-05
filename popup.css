@@ -421,6 +421,13 @@ body {
   gap: 6px;
 }
 
+.backup-note {
+  margin-top: 7px;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.35;
+}
+
 .spacer {
   flex: 1;
 }

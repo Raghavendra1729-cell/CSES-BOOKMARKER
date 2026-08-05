@@ -165,10 +165,9 @@
         btn.title = "Open the last AI review for this problem";
         btn.addEventListener("click", () => {
           const sub = Object.assign({}, meta, resp.submission || {});
-          const cached = resp.data && resp.data.summary ? resp.data : { summary: resp.data, detail: null };
-          panel.renderSummary(cached.summary, sub, {
-            detail: cached.detail,
-            onRerun: () => {
+          panel.renderReview(resp.data, sub, {
+            fromCache: true,
+            onReviewAgain: () => {
               if (!sub.code || !String(sub.code).trim()) {
                 panel.renderError(
                   "No saved code. Open a submission result page to run a new review."
@@ -285,8 +284,8 @@
       if (existing) await S.patch(id, { timeSpentMs: state.finalMs });
     }
 
-    // AI review for every verdict (AC / WA / TLE / …).
-    runPostSubmissionReview();
+    // AI review is intentionally manual. Never spend a model call on page load.
+    installReviewButton();
   }
 
   // ---------- AI post-submission review ----------
@@ -306,10 +305,6 @@
       return;
     }
 
-    function go(sub) {
-      requestReview(sub, panel, force);
-    }
-
     if (!submission.code || !submission.code.trim()) {
       // Result page may still be loading code; retry briefly.
       setTimeout(() => {
@@ -319,20 +314,54 @@
           return;
         }
         if (!submission.code || !submission.code.trim()) {
-          // Still try cache-only (re-open without code on page)
-          if (!force) {
-            requestReview(submission, panel, false);
-            return;
-          }
           panel.renderError("No source code found on this result page.");
           return;
         }
-        go(submission);
+        requestReview(submission, panel, force);
       }, 600);
       return;
     }
 
-    go(submission);
+    requestReview(submission, panel, force);
+  }
+
+  function installReviewButton() {
+    if (document.getElementById("csesbm-review-launch")) return;
+    const scrape = globalThis.CSESReviewScrape;
+    const panel = globalThis.CSESReviewPanel;
+    if (!scrape || !panel) return;
+
+    let submission;
+    try { submission = scrape.scrapeSubmission(); } catch (_) { return; }
+
+    const launch = document.createElement("button");
+    launch.id = "csesbm-review-launch";
+    launch.className = "csesbm-review-launch";
+    launch.type = "button";
+    launch.textContent = "Review submission";
+    launch.title = "Ask MiniMax to review this submission once";
+    document.body.appendChild(launch);
+
+    chrome.runtime.sendMessage({ type: "GET_CACHED_REVIEW", submission }, (response) => {
+      if (chrome.runtime.lastError || !response || !response.hit) return;
+      launch._csesbmSavedReview = response;
+      launch.classList.add("has-saved");
+      launch.textContent = "Open review";
+    });
+
+    launch.addEventListener("click", () => {
+      try { submission = scrape.scrapeSubmission(); } catch (_) { /* use initial scrape */ }
+      const savedReview = launch._csesbmSavedReview;
+      if (savedReview) {
+        const savedSubmission = Object.assign({}, submission, savedReview.submission || {});
+        panel.renderReview(savedReview.data, savedSubmission, {
+          fromCache: true,
+          onReviewAgain: () => runPostSubmissionReview({ force: true }),
+        });
+        return;
+      }
+      runPostSubmissionReview({ force: false });
+    });
   }
 
   let activeRequestId = null;
@@ -342,21 +371,31 @@
   }
   function requestReview(submission, panel, force) {
     cancelReview();
-    const summaryId = crypto.randomUUID(); activeRequestId = summaryId;
-    panel.renderLoading("Reading problem…", { onClose: cancelReview });
-    chrome.runtime.sendMessage({ type: "REVIEW_SUBMISSION", submission, force: Boolean(force), stage: "summary", requestId: summaryId, schemaVersion: 2 }, (resp) => {
-      if (activeRequestId !== summaryId) return;
-      if (chrome.runtime.lastError || !resp || !resp.ok) { panel.renderError((chrome.runtime.lastError && chrome.runtime.lastError.message) || (resp && resp.error) || "Review failed", { onClose: cancelReview }); return; }
-      const show = (detail, detailError, detailLoading) => panel.renderSummary(resp.data, submission, { detail, detailError, detailLoading, onClose: cancelReview, onRetryDetail: () => loadDetail(true) });
-      const loadDetail = (detailForce) => {
-        const detailId = crypto.randomUUID(); activeRequestId = detailId; show(null, null, true);
-        chrome.runtime.sendMessage({ type: "REVIEW_SUBMISSION", submission, force: Boolean(detailForce), stage: "detail", requestId: detailId, schemaVersion: 2 }, (detailResp) => {
-          if (activeRequestId !== detailId) return;
-          if (chrome.runtime.lastError || !detailResp || !detailResp.ok) { show(null, (detailResp && detailResp.error) || "Details timed out. Your quick review is still available.", false); return; }
-          show(detailResp.data, null, false);
+    const requestId = crypto.randomUUID();
+    activeRequestId = requestId;
+    panel.renderLoading("Reviewing submission…", { onClose: cancelReview });
+    chrome.runtime.sendMessage({ type: "REVIEW_SUBMISSION", submission, force: Boolean(force), requestId, schemaVersion: 3 }, (resp) => {
+      if (activeRequestId !== requestId) return;
+      activeRequestId = null;
+      if (chrome.runtime.lastError || !resp || !resp.ok) {
+        const message = (chrome.runtime.lastError && chrome.runtime.lastError.message) || (resp && resp.error) || "Review failed";
+        panel.renderError(message, {
+          onClose: cancelReview,
+          onRetry: () => requestReview(submission, panel, true),
         });
-      };
-      show(null, null, true); loadDetail(false);
+        return;
+      }
+      const launch = document.getElementById("csesbm-review-launch");
+      if (launch) {
+        launch.classList.add("has-saved");
+        launch.textContent = "Open review";
+        launch._csesbmSavedReview = { data: resp.data, submission };
+      }
+      panel.renderReview(resp.data, submission, {
+        fromCache: Boolean(resp.fromCache),
+        onClose: cancelReview,
+        onReviewAgain: () => requestReview(submission, panel, true),
+      });
     });
   }
 

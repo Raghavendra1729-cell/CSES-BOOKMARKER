@@ -1,26 +1,50 @@
 (function (global) {
-  const SYSTEM_PROMPT = `You are a precise CSES post-submission reviewer. Return only JSON matching the requested schema. Use the supplied statement, constraints, samples and code; do not invent them. Rejected submissions are hint-only: never give algorithm names, corrected logic, pseudocode, solution steps, or code. Accepted submissions may teach complete practical solutions.`;
-  function context(p) {
+  const SYSTEM_PROMPT = `You are a precise CSES post-submission code reviewer. Return only valid JSON with exactly the requested fields. Use only the supplied statement, constraints, verdict and source code.
+
+For a rejected submission, protect the learning process: give one microscopic observational hint only. Never name the intended algorithm, provide corrected logic, pseudocode, steps, or code.
+
+For an accepted submission, review correctness and complexity, then provide 1-4 genuinely useful alternative implementations that are more efficient, simpler, or have a meaningful trade-off. Every alternative must include complete compilable code in the submitted language. Do not pad the list with inferior duplicates.`;
+
+  function context(payload) {
     return [
-      `Problem: ${p.problem_name || "unknown"} (id=${p.problem_id || "?"})`, `Language: ${p.language || "unknown"}`, `Verdict: ${p.verdict || "Unknown"}`,
-      `Statement:\n${String(p.problem_statement || "Unavailable").slice(0, 7000)}`,
-      `Constraints:\n${String(p.constraints || "Unavailable").slice(0, 1800)}`,
-      `Samples:\n${String(p.samples || "Unavailable").slice(0, 1800)}`,
-      `Submitted code:\n${String(p.code || "").slice(0, 14000)}`
+      `Problem: ${payload.problem_name || "unknown"} (id=${payload.problem_id || "?"})`,
+      `Language: ${payload.language || "unknown"}`,
+      `Verdict: ${payload.verdict || "Unknown"}`,
+      `Accepted: ${Boolean(payload.accepted)}`,
+      `Statement:\n${String(payload.problem_statement || "Unavailable").slice(0, 7000)}`,
+      `Constraints:\n${String(payload.constraints || "Unavailable").slice(0, 1800)}`,
+      `Samples:\n${String(payload.samples || "Unavailable").slice(0, 1800)}`,
+      `Submitted code:\n${String(payload.code || "").slice(0, 14000)}`,
     ].join("\n\n");
   }
-  function buildStagePrompt(payload, stage) {
-    const accepted = Boolean(payload.accepted);
-    let task;
-    if (stage === "summary") task = accepted
-      ? "Give a fast diagnosis: correctness, code-quality evidence, current time/space complexity, and whether it is likely optimal. first_hint may be a concise improvement direction."
-      : "Give a fast hint-only diagnosis: likely issue category, suspicious code locations/evidence, current complexity, and one tiny observational hint. Do not name an algorithm or explain a correction.";
-    else if (accepted) task = "Give 2–4 meaningfully distinct practical approaches, ordered simple-to-optimal when applicable. Every approach needs an idea, numbered logic, correctness argument, time and space complexity, trade-offs, and COMPLETE compilable code in the submitted language. Include only approaches you can make consistent with the statement.";
-    else task = "Give a deeper hint-only critique and 2–4 layered observational hints. Do not use algorithm names, corrected logic, pseudocode, solution steps, or code.";
-    return context(payload) + "\n\nTask:\n" + task;
+
+  function buildPrompt(payload) {
+    if (!payload.accepted) {
+      return context(payload) + `\n\nReturn exactly this JSON shape:\n{
+  "verdict_summary": "one short sentence",
+  "tiny_hint": "one small observational hint, at most two short sentences"
+}`;
+    }
+    return context(payload) + `\n\nReturn exactly this JSON shape:\n{
+  "verdict_summary": "short assessment",
+  "current_analysis": {
+    "correctness": "short explanation",
+    "time_complexity": "O(...) with a short reason",
+    "space_complexity": "O(...) with a short reason",
+    "is_optimal": true
+  },
+  "code_quality": ["specific concise note"],
+  "improvements": ["specific concise improvement"],
+  "approaches": [{
+    "name": "approach name",
+    "idea": "concise explanation",
+    "time_complexity": "O(...) ",
+    "space_complexity": "O(...) ",
+    "tradeoffs": "when this is better or worse",
+    "code": "complete compilable ${payload.language || "submitted-language"} code"
+  }]
+}\nInclude only alternatives that are actually useful. If the submitted approach is already optimal, give a simpler or equally optimal alternative with a real trade-off.`;
   }
-  function buildRepairPrompt(payload, details, problem) {
-    return context(payload) + "\n\nThe accepted-review JSON below failed this concrete validation: " + problem + ". Return a repaired acceptedDetails JSON only. Preserve valid approaches, provide complete compilable code for every approach.\n" + JSON.stringify(details);
-  }
-  global.CSESReviewPrompts = { SYSTEM_PROMPT, buildStagePrompt, buildRepairPrompt };
+
+  global.CSESReviewPrompts = { SYSTEM_PROMPT, buildPrompt };
 })(typeof self !== "undefined" ? self : globalThis);

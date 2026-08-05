@@ -1,115 +1,70 @@
-# CSES Bookmarker + AI Reviewer
+# CSES Bookmarker + MiniMax Reviewer
 
 Chrome extension for [CSES Problem Set](https://cses.fi/problemset/):
 
-- ☆ bookmark problems
-- per-problem solve timer
-- **AI post-submission code review** (after every result)
-
-Personal use only. Reviews call the **Hugging Face OpenAI-compatible router directly** from the extension background worker. **No local server to keep running.**
-
-## Why `.env` does not work
-
-Chrome extensions **cannot read `.env`**. Putting `HF_TOKEN` only in `.env` has no effect.
-
-Use **one** of these instead:
-
-| Method | How |
-|--------|-----|
-| **Popup (easiest)** | Open extension popup → paste `hf_…` → **Save** → **Test API** |
-| **`config.local.js`** | Copy `config.local.example.js` → `config.local.js`, put token, **Reload** extension |
-
-Both stay on your machine. `config.local.js` and `.env` are gitignored.
-
-## Setup
-
-### 1. Load the extension
-
-1. Chrome → `chrome://extensions`
-2. Enable **Developer mode**
-3. **Load unpacked** → this folder (or click **Reload** after changing `config.local.js`)
-
-### 2. Add your Hugging Face token
-
-**Option A — popup**
-
-1. Click the extension icon  
-2. Paste token from https://huggingface.co/settings/tokens  
-3. **Save** → **Test API** (should say OK)
-
-**Option B — file** (if you prefer files over the popup)
-
-```bash
-cp config.local.example.js config.local.js
-# edit config.local.js → set hfToken: "hf_..."
-```
-
-Then **Reload** the extension on `chrome://extensions`.
-
-### 3. Use it
-
-Submit on CSES → land on `/problemset/result/...` → review panel appears automatically.
-
-## How it works
-
-```
-CSES result page
-  → scrape verdict + code
-  → background service worker
-  → POST https://router.huggingface.co/v1/chat/completions
-       Authorization: Bearer <token from chrome.storage>
-       model: MiniMaxAI/MiniMax-M3:novita
-  → quick review panel (then detailed hints or approaches)
-```
-
-Same API shape as:
-
-```python
-from openai import OpenAI
-import os
-
-client = OpenAI(
-    base_url="https://router.huggingface.co/v1",
-    api_key=os.environ["HF_TOKEN"],
-)
-client.chat.completions.create(model="MiniMaxAI/MiniMax-M3:novita", messages=[...])
-```
-
-## Security
-
-| Where | What |
-|-------|------|
-| Extension popup → `chrome.storage.local` | Your HF token (not synced to Google account) |
-| `.env` / `.env.example` | Optional notes only; **not used by the extension** |
-| GitHub | Never commit tokens (`.env` is gitignored) |
-
-Clear the token anytime with **Clear token** in the popup.
+- bookmark problems and add notes
+- track per-problem solve time
+- manually request a focused post-submission review
+- sync bookmarks through Chrome and create portable backups
 
 ## Review behavior
 
-### Rejected (WA / TLE / MLE / RE / CE)
+Reviews are never automatic. On a CSES result page, click **Review submission**.
+The extension makes exactly one Hugging Face generation request using
+`MiniMaxAI/MiniMax-M3:novita`.
 
-- Fast diagnosis, evidence and complexity
-- Layered hints only — never code, pseudocode, corrections, or algorithm names
+- **Rejected:** verdict summary plus one small hint. No solution, algorithm name,
+  pseudocode, steps, or replacement code.
+- **Accepted:** correctness, time/space complexity, code-quality improvements, and
+  1–4 useful alternative approaches with complete code. Alternatives are shown
+  directly in the panel.
+- **Saved review:** clicking **Open review** reads the local cache and makes no
+  model request. **Review again** explicitly makes one new request.
 
-### Accepted
+MiniMax-M3 is the only review model; there is no separate quick-model call or
+automatic repair/retry call.
 
-- Immediate correctness/quality/complexity summary
-- 2–4 collapsible practical approaches with proof, trade-offs and complete code
-- Separate fast and detailed models in the popup; quick model defaults to `:fastest`
+## Setup
 
-## Optional local Python server
+1. Open `chrome://extensions` and enable **Developer mode**.
+2. Choose **Load unpacked** and select this folder.
+3. Open the extension popup, paste a Hugging Face token with Inference Providers
+   access, click **Save**, then **Test API**.
 
-`server/` is optional (dev/CLI). Normal use is extension-only. If you still want it:
+Chrome extensions cannot read `.env`. The popup is the only token input: paste
+the token, click **Save**, and use **Clear token** when you want to remove it.
+
+The request goes directly to Hugging Face's OpenAI-compatible router:
+
+```text
+CSES result → Review submission button
+  → POST https://router.huggingface.co/v1/chat/completions
+  → MiniMaxAI/MiniMax-M3:novita
+  → one accepted review or one tiny rejected hint
+```
+
+## Persistence and privacy
+
+- Bookmarks, notes, solved state, and final solve times use `chrome.storage.sync`.
+  Chrome restores them when Sync is enabled and the same extension identity is
+  installed.
+- Active timers, saved reviews, and submitted source code stay in
+  `chrome.storage.local`; Chrome clears local extension data on uninstall.
+- Use **Backup** before uninstalling for a reliable portable copy. **Restore**
+  imports bookmarks, timers, and reviews after reinstalling.
+- Backup files can contain submitted source code. The Hugging Face token is never
+  exported or put in Chrome Sync.
+
+## Optional local Python API
+
+Normal extension use does not need a local server. For CLI/dev use only:
 
 ```bash
-cp .env.example .env   # set HF_TOKEN
-python3 -m venv .venv && source .venv/bin/activate
+cp .env.example .env
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
 python -m server.app
 ```
 
-## Scope
-
-- **CSES only** (`cses.fi/problemset/*`)
-- Not a general chatbot
+The optional API uses the same one-call MiniMax-M3 behavior.

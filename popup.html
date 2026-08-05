@@ -36,13 +36,9 @@
     <section class="review-settings" id="review-settings">
       <div class="review-settings-title">AI review (CSES results)</div>
       <p class="review-note">
-        Chrome cannot read <code>.env</code>. Use the field below <b>or</b>
-        <code>config.local.js</code>, then Reload the extension.
+        Manual only: click <b>Review submission</b> on a CSES result page.
+        Each click sends one request to <code>MiniMaxAI/MiniMax-M3</code> through Hugging Face.
       </p>
-      <label class="review-toggle">
-        <input type="checkbox" id="review-enabled" checked />
-        <span>Auto-review after submit</span>
-      </label>
       <label class="review-field">
         <span>Hugging Face token</span>
         <input
@@ -54,20 +50,6 @@
         />
       </label>
       <div id="review-token-hint" class="review-token-hint" hidden></div>
-      <label class="review-field">
-        <span>Quick-review model</span>
-        <input
-          id="review-summary-model"
-          type="text"
-          spellcheck="false"
-          autocomplete="off"
-          placeholder="Qwen/Qwen2.5-Coder-32B-Instruct:fastest"
-        />
-      </label>
-      <label class="review-field">
-        <span>Detailed-review model</span>
-        <input id="review-detail-model" type="text" spellcheck="false" autocomplete="off" placeholder="MiniMaxAI/MiniMax-M3:novita" />
-      </label>
       <div class="review-settings-actions">
         <button type="button" id="review-save" class="ghost-btn">Save</button>
         <button type="button" id="review-health" class="ghost-btn">Test API</button>
@@ -78,12 +60,13 @@
 
     <footer class="footer">
       <div class="footer-actions">
-        <button id="export-btn" class="ghost-btn" title="Download all bookmarks as a JSON file">Export</button>
-        <button id="import-btn" class="ghost-btn" title="Restore bookmarks from a JSON file">Import</button>
+        <button id="export-btn" class="ghost-btn" title="Back up bookmarks, timers, and saved reviews">Backup</button>
+        <button id="import-btn" class="ghost-btn" title="Restore a CSES Bookmarker backup">Restore</button>
         <input id="import-file" type="file" accept="application/json,.json" hidden />
         <span class="spacer"></span>
         <button id="clear-all" class="ghost-btn danger" hidden>Clear all</button>
       </div>
+      <div class="backup-note">Bookmarks sync with Chrome. Backup also preserves local timers and reviews across uninstall; your HF token is never exported.</div>
       <div id="flash" class="flash" hidden></div>
     </footer>
 

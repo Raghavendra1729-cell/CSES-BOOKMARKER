@@ -135,23 +135,11 @@
     return entry;
   }
 
-  async function saveStage(submission, stage, data, timing) {
-    const previous = (await getCached(submission)) || null;
-    const review = previous && previous.data && previous.data.summary
-      ? previous.data
-      : { summary: previous && previous.data && !previous.data.verdict_summary ? null : (previous && previous.data) || null, detail: null };
-    if (stage === "summary") review.summary = data;
-    else review.detail = data;
-    review.timing = { ...(review.timing || {}), [stage]: timing || null };
-    return save(submission, review);
-  }
-
   global.CSESReviewCache = {
     getCached,
     getByResultId,
     getByProblemId,
     save,
-    saveStage,
     resultKey,
     problemKey,
   };
