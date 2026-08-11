@@ -18,11 +18,13 @@ describe("CSES result scraper", () => {
   it("does not treat an earlier solved sidebar task as an accepted re-submission", () => {
     window.document.body.innerHTML = `
       <a href="/problemset/task/1068">Weird Algorithm</a>
+      <a href="/problemset/task/1083">Unrelated navigation task</a>
       <a class="current" href="/problemset/task/1068"><span class="task-score icon full"></span>Weird Algorithm</a>
       <pre>int main() { return 0; }</pre>
     `;
 
     const submission = window.CSESReviewScrape.scrapeSubmission();
+    expect(submission.problem_id).toBe("1068");
     expect(submission.verdict).toBe("Unknown");
     expect(submission.accepted).toBe(false);
   });

@@ -249,18 +249,6 @@
     });
   }
 
-  // The result page reuses the same `.task-score` verdict marker the rest of
-  // the site uses for "solved" — scoped to the sidebar's current-task link
-  // first (same reliable spot decorateTaskPage already reads), falling back
-  // to a document-wide search if that scope isn't present on this layout.
-  function detectAcceptedOnResultPage() {
-    const sidebarCurrent = document.querySelector(".nav.sidebar a.current");
-    if (sidebarCurrent && sidebarCurrent.querySelector(".task-score")) {
-      return detectSolved(sidebarCurrent);
-    }
-    return detectSolved(document);
-  }
-
   function showAcceptedToast(timeText) {
     const toast = document.createElement("div");
     toast.className = "csesbm-toast";
@@ -271,11 +259,20 @@
   }
 
   async function decorateResultPage() {
-    const link = document.querySelector('a[href*="/problemset/task/"]');
-    const id = link ? idFromHref(link.getAttribute("href")) : null;
+    // A solved icon in the sidebar means the task was accepted at some point;
+    // it does not describe this particular result. Reuse the submission
+    // scraper so a later WA never stops or overwrites the solve timer.
+    let submission = null;
+    try {
+      submission = globalThis.CSESReviewScrape && CSESReviewScrape.scrapeSubmission();
+    } catch (_) {
+      // The review launcher will display a focused error if the page cannot
+      // be scraped. Do not alter timing data without a reliable verdict.
+    }
+    const id = submission && submission.problem_id;
 
-    // Timer stop only on Accepted (existing behavior).
-    if (id && detectAcceptedOnResultPage()) {
+    // Timer stop only on this result being Accepted.
+    if (id && submission && submission.accepted) {
       const state = await CSESTimer.stop(id);
       showAcceptedToast(formatMs(state.finalMs));
 

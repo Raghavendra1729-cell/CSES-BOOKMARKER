@@ -127,7 +127,12 @@
     let problem_name = "";
     let category = "";
 
-    const taskLink = document.querySelector('a[href*="/problemset/task/"]');
+    // The sidebar current entry always identifies the task for this result.
+    // Prefer it over arbitrary task links in page content or navigation.
+    const taskLink =
+      document.querySelector('.nav.sidebar a.current[href*="/problemset/task/"]') ||
+      document.querySelector('a.current[href*="/problemset/task/"]') ||
+      document.querySelector('a[href*="/problemset/task/"]');
     if (taskLink) {
       problem_id = idFromHref(taskLink.getAttribute("href"));
       problem_name = text(taskLink);

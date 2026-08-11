@@ -3,7 +3,8 @@ importScripts(
   "reviewer/schema.js",
   "reviewer/prompts.js",
   "reviewer/hf-client.js",
-  "reviewer/review-cache.js"
+  "reviewer/review-cache.js",
+  "reviewer/problem-context.js"
 );
 
 const PREFIX = "csesbm:";
@@ -92,25 +93,10 @@ async function fetchProblemContext(submission, signal) {
   const response = await fetch("https://cses.fi/problemset/task/" + encodeURIComponent(id), { signal });
   if (!response.ok) throw new Error("Could not read the CSES problem statement (HTTP " + response.status + ").");
   const html = await response.text();
-  const source = (html.match(/<div class="task-content">([\s\S]*?)<\/div>\s*<\/div>/i) || [null, html])[1];
-  const plain = source
-    .replace(/<\/(?:p|h[1-6]|li|pre|div)>/gi, "\n")
-    .replace(/<br\s*\/?>/gi, "\n")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/&nbsp;/g, " ")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&amp;/g, "&")
-    .replace(/[ \t]+\n/g, "\n")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
-  const chunks = plain.split(/\n(?=(?:Input|Output|Constraints|Example|Sample|Time limit|Memory limit))/i);
-  const take = (name) => chunks.filter((part) => new RegExp("^" + name, "i").test(part.trim())).join("\n\n");
-  const context = {
-    problem_statement: plain.slice(0, 11000),
-    constraints: take("Constraints|Time limit|Memory limit").slice(0, 2400) || submission.time_limit || "Not explicitly listed",
-    samples: take("Example|Sample").slice(0, 2400) || "Not explicitly listed",
-  };
+  const context = CSESReviewProblemContext.extract(html);
+  if (context.constraints === "Not explicitly listed" && submission.time_limit) {
+    context.constraints = submission.time_limit;
+  }
   problemContextCache.set(id, context);
   return { ...submission, ...context };
 }

@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 _ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(_ROOT / ".env")
 
-from .reviewer import review_submission  # noqa: E402
+from .reviewer import _model, review_submission  # noqa: E402
 
 app = FastAPI(title="CSES Submission Reviewer", docs_url=None, redoc_url=None)
 
@@ -53,8 +53,8 @@ def health():
     return {
         "ok": True,
         "has_token": has_token,
-        "model": os.environ.get("REVIEW_MODEL", ""),
-        "base_url": os.environ.get("HF_BASE_URL", ""),
+        "model": _model(),
+        "base_url": os.environ.get("HF_BASE_URL", "https://router.huggingface.co/v1"),
     }
 
 
