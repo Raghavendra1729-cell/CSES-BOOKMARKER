@@ -2,7 +2,9 @@
 (function (global) {
   const DEFAULTS = {
     baseUrl: "https://router.huggingface.co/v1",
-    model: "MiniMaxAI/MiniMax-M3:fastest",
+    // Keep the browser client aligned with the documented and optional-server
+    // provider variant. A different suffix can route to a different model.
+    model: "MiniMaxAI/MiniMax-M3:novita",
   };
 
   function extractJson(text) {

@@ -92,10 +92,10 @@
   }
 
   function scrapeVerdictFallback() {
-    // Sidebar / score icons on CSES: full = accepted
-    const full = document.querySelector(".task-score.icon.full");
-    if (full) return "Accepted";
-
+    // Do not infer this submission's result from the sidebar score icon: it
+    // represents whether the problem was solved at some point and can remain
+    // full after a later rejected re-submission. That would expose the
+    // accepted-review response shape for an incorrect attempt.
     const bodyText = text(document.body);
     const patterns = [
       /Wrong Answer/i,
