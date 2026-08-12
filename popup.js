@@ -208,7 +208,13 @@
   }
 
   function localGetAll() {
-    return new Promise((resolve) => chrome.storage.local.get(null, (all) => resolve(all || {})));
+    return new Promise((resolve, reject) => {
+      chrome.storage.local.get(null, (all) => {
+        const error = chrome.runtime.lastError;
+        if (error) reject(new Error(error.message));
+        else resolve(all || {});
+      });
+    });
   }
 
   function localSet(values) {
@@ -220,7 +226,16 @@
   }
 
   function isPortableLocalKey(key) {
-    return key.startsWith("csesbm:rev:r:") || key.startsWith("csesbm:rev:p:") || key.startsWith("csesbm-timer:");
+    return (
+      /^csesbm:rev:[rp]:[A-Za-z0-9_-]+$/.test(key) ||
+      /^csesbm-timer:\d+$/.test(key)
+    );
+  }
+
+  function isImportableBookmark(raw) {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return false;
+    const id = String(raw.id == null ? "" : raw.id);
+    return /^\d+$/.test(id) && id.length <= 12;
   }
 
   async function exportBookmarks() {
@@ -259,25 +274,43 @@
       const data = JSON.parse(text);
       const arr = Array.isArray(data) ? data : data && data.bookmarks;
       if (!Array.isArray(arr)) throw new Error("format");
+      if (!Array.isArray(data) && data.app && data.app !== "cses-bookmarker") {
+        throw new Error("wrong-app");
+      }
+      if (arr.length > 600) throw new Error("too-many-bookmarks");
 
       let n = 0;
       for (const raw of arr) {
-        if (!raw || raw.id == null) continue;
+        if (!isImportableBookmark(raw)) continue;
         const saved = await CSESBM.put(raw);
         map[saved.id] = saved;
         n += 1;
       }
+      let localCount = 0;
       if (data && data.localData && typeof data.localData === "object") {
         const portable = {};
         Object.keys(data.localData).filter(isPortableLocalKey).forEach((key) => {
-          portable[key] = data.localData[key];
+          const value = data.localData[key];
+          if (value && typeof value === "object" && !Array.isArray(value)) {
+            portable[key] = value;
+            localCount += 1;
+          }
         });
         if (Object.keys(portable).length) await localSet(portable);
       }
       render();
-      flash(`Restored ${n} bookmark${n === 1 ? "" : "s"} and local review data.`);
+      flash(
+        `Restored ${n} bookmark${n === 1 ? "" : "s"}` +
+          (localCount ? ` and ${localCount} local item${localCount === 1 ? "" : "s"}.` : ".")
+      );
     } catch (e) {
-      flash("Import failed — not a valid backup file.", true);
+      const message = e && e.message;
+      flash(
+        message === "format" || message === "wrong-app" || message === "too-many-bookmarks"
+          ? "Import failed — this is not a supported CSES Bookmarker backup."
+          : "Import failed — Chrome could not restore this backup.",
+        true
+      );
     }
   }
 
@@ -295,9 +328,13 @@
 
   exportBtn.addEventListener("click", exportBookmarks);
   importBtn.addEventListener("click", () => importFile.click());
-  importFile.addEventListener("change", () => {
+  importFile.addEventListener("change", async () => {
     const file = importFile.files && importFile.files[0];
-    if (file) importBookmarks(file);
+    if (file) {
+      importBtn.disabled = true;
+      await importBookmarks(file);
+      importBtn.disabled = false;
+    }
     importFile.value = "";
   });
 
