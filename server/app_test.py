@@ -5,6 +5,7 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 
 from server.app import app
+from server.reviewer import validate_review
 
 
 class HealthEndpointTest(unittest.TestCase):
@@ -16,6 +17,15 @@ class HealthEndpointTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["model"], "MiniMaxAI/MiniMax-M3:novita")
         self.assertEqual(response.json()["base_url"], "https://router.huggingface.co/v1")
+
+
+class ReviewContractTest(unittest.TestCase):
+    def test_server_rejects_extra_fields_from_a_rejected_review(self):
+        problem = validate_review(
+            {"verdict_summary": "Wrong answer.", "tiny_hint": "Check the edge.", "extra": "no"},
+            accepted=False,
+        )
+        self.assertEqual(problem, "Rejected review has unexpected fields.")
 
 
 if __name__ == "__main__":

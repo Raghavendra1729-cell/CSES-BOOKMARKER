@@ -30,4 +30,10 @@ describe("single review schema", () => {
     expect(schema.jsonSchema(true).schema.additionalProperties).toBe(false);
     expect(schema.jsonSchema(false).schema.additionalProperties).toBe(false);
   });
+
+  it("rejects fields outside the promised response contract", () => {
+    expect(
+      schema.validate({ verdict_summary: "WA", tiny_hint: "Check the edge.", extra: "no" }, false)
+    ).toMatch(/unexpected fields/);
+  });
 });

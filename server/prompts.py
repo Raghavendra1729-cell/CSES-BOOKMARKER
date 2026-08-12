@@ -14,6 +14,8 @@ def build_user_prompt(payload: dict) -> str:
         f"Verdict: {payload.get('verdict') or 'Unknown'}",
         f"Accepted: {bool(payload.get('accepted'))}",
         "Statement:\n" + str(payload.get("problem_statement") or "Unavailable")[:7000],
+        "Constraints:\n" + str(payload.get("constraints") or "Unavailable")[:1800],
+        "Samples:\n" + str(payload.get("samples") or "Unavailable")[:1800],
         "Submitted code:\n" + str(payload.get("code") or "")[:14000],
     ]
     if not payload.get("accepted"):
