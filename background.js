@@ -17,6 +17,27 @@ const DEFAULT_REVIEW_SETTINGS = {
 };
 const activeReviews = new Map();
 const problemContextCache = new Map();
+let metricWrite = Promise.resolve();
+
+function localGet(keys) {
+  return new Promise((resolve, reject) => {
+    chrome.storage.local.get(keys, (result) => {
+      const error = chrome.runtime.lastError;
+      if (error) reject(new Error(error.message));
+      else resolve(result || {});
+    });
+  });
+}
+
+function localSet(values) {
+  return new Promise((resolve, reject) => {
+    chrome.storage.local.set(values, () => {
+      const error = chrome.runtime.lastError;
+      if (error) reject(new Error(error.message));
+      else resolve();
+    });
+  });
+}
 
 function recount() {
   chrome.storage.sync.get(null, (all) => {
@@ -39,7 +60,14 @@ chrome.storage.onChanged.addListener((changes, area) => {
 recount();
 
 function mergeSettings(stored) {
-  const settings = { ...DEFAULT_REVIEW_SETTINGS, ...(stored || {}) };
+  const settings = {
+    ...DEFAULT_REVIEW_SETTINGS,
+    ...(stored || {}),
+    // The popup does not expose a custom endpoint. Pinning it prevents a
+    // stale or crafted storage value from sending the token elsewhere.
+    baseUrl: DEFAULT_REVIEW_SETTINGS.baseUrl,
+    enabled: true,
+  };
   if ((settings.hfToken || "").trim()) {
     settings._tokenSource = "popup";
   } else {
@@ -49,10 +77,8 @@ function mergeSettings(stored) {
 }
 
 function getReviewSettings() {
-  return new Promise((resolve) => {
-    chrome.storage.local.get(REVIEW_SETTINGS_KEY, (result) => {
-      resolve(mergeSettings(result[REVIEW_SETTINGS_KEY]));
-    });
+  return localGet(REVIEW_SETTINGS_KEY).then((result) => {
+    return mergeSettings(result[REVIEW_SETTINGS_KEY]);
   });
 }
 
@@ -76,11 +102,15 @@ function sanitizeSettings(settings) {
 }
 
 function recordMetric(metric) {
-  chrome.storage.local.get(REVIEW_METRICS_KEY, (result) => {
+  metricWrite = metricWrite.catch(() => undefined).then(async () => {
+    const result = await localGet(REVIEW_METRICS_KEY);
     const rows = Array.isArray(result[REVIEW_METRICS_KEY]) ? result[REVIEW_METRICS_KEY] : [];
     rows.push({ at: Date.now(), ...metric });
-    chrome.storage.local.set({ [REVIEW_METRICS_KEY]: rows.slice(-100) });
+    await localSet({ [REVIEW_METRICS_KEY]: rows.slice(-100) });
   });
+  // Metrics are best-effort and must never make a review flow fail.
+  metricWrite = metricWrite.catch(() => undefined);
+  return metricWrite;
 }
 
 async function fetchProblemContext(submission, signal) {
@@ -214,47 +244,61 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 
   if (message.type === "SET_REVIEW_SETTINGS") {
-    chrome.storage.local.get(REVIEW_SETTINGS_KEY, (result) => {
-      const stored = result[REVIEW_SETTINGS_KEY] || {};
-      const incoming = message.settings || {};
-      const next = {
-        enabled: true,
-        baseUrl: String(incoming.baseUrl || stored.baseUrl || DEFAULT_REVIEW_SETTINGS.baseUrl).trim(),
-        hfToken: stored.hfToken || "",
-      };
-      if (incoming.hfToken != null && String(incoming.hfToken).trim()) {
-        next.hfToken = String(incoming.hfToken).trim();
-      }
-      chrome.storage.local.set({ [REVIEW_SETTINGS_KEY]: next }, () => {
+    (async () => {
+      try {
+        const result = await localGet(REVIEW_SETTINGS_KEY);
+        const stored = result[REVIEW_SETTINGS_KEY] || {};
+        const incoming = message.settings || {};
+        const next = {
+          enabled: true,
+          baseUrl: DEFAULT_REVIEW_SETTINGS.baseUrl,
+          hfToken: stored.hfToken || "",
+        };
+        if (incoming.hfToken != null && String(incoming.hfToken).trim()) {
+          next.hfToken = String(incoming.hfToken).trim();
+        }
+        await localSet({ [REVIEW_SETTINGS_KEY]: next });
         sendResponse({ ok: true, settings: sanitizeSettings(mergeSettings(next)) });
-      });
-    });
+      } catch (error) {
+        sendResponse({ ok: false, error: error.message || "Could not save review settings." });
+      }
+    })();
     return true;
   }
 
   if (message.type === "CLEAR_HF_TOKEN") {
-    chrome.storage.local.get(REVIEW_SETTINGS_KEY, (result) => {
-      const stored = { ...(result[REVIEW_SETTINGS_KEY] || {}), hfToken: "" };
-      chrome.storage.local.set({ [REVIEW_SETTINGS_KEY]: stored }, () => {
+    (async () => {
+      try {
+        const result = await localGet(REVIEW_SETTINGS_KEY);
+        const stored = {
+          ...(result[REVIEW_SETTINGS_KEY] || {}),
+          baseUrl: DEFAULT_REVIEW_SETTINGS.baseUrl,
+          enabled: true,
+          hfToken: "",
+        };
+        await localSet({ [REVIEW_SETTINGS_KEY]: stored });
         sendResponse({ ok: true, settings: sanitizeSettings(mergeSettings(stored)) });
-      });
-    });
+      } catch (error) {
+        sendResponse({ ok: false, error: error.message || "Could not clear the token." });
+      }
+    })();
     return true;
   }
 
   if (message.type === "HEALTH_CHECK") {
-    getReviewSettings().then(async (settings) => {
-      if (!(settings.hfToken || "").trim()) {
-        sendResponse({ ok: false, error: "No HF token. Paste one in the popup and click Save." });
-        return;
-      }
-      const base = String(settings.baseUrl || DEFAULT_REVIEW_SETTINGS.baseUrl).replace(/\/$/, "");
+    (async () => {
       try {
+        const settings = await getReviewSettings();
+        if (!(settings.hfToken || "").trim()) {
+          sendResponse({ ok: false, error: "No HF token. Paste one in the popup and click Save." });
+          return;
+        }
+        const base = DEFAULT_REVIEW_SETTINGS.baseUrl.replace(/\/$/, "");
         const response = await fetch(base + "/models", {
           headers: { Authorization: "Bearer " + settings.hfToken.trim() },
         });
-        if (response.status === 401 || response.status === 403) {
-          sendResponse({ ok: false, error: "HF rejected the token (HTTP " + response.status + ")." });
+        if (!response.ok) {
+          sendResponse({ ok: false, error: "Hugging Face API check failed (HTTP " + response.status + ")." });
           return;
         }
         sendResponse({
@@ -269,7 +313,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       } catch (error) {
         sendResponse({ ok: false, error: error.message || "Cannot reach Hugging Face router" });
       }
-    });
+    })();
     return true;
   }
 });
