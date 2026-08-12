@@ -54,6 +54,17 @@ CSES result → Review submission button
   imports bookmarks, timers, and reviews after reinstalling.
 - Backup files can contain submitted source code. The Hugging Face token is never
   exported or put in Chrome Sync.
+- Restore accepts only CSES Bookmarker data and its known bookmark, timer, and
+  review keys. Keep backups private because saved reviews can include source code.
+
+## Development checks
+
+```bash
+npm install
+npm test
+npm run check
+python -m unittest server.app_test
+```
 
 ## Optional local Python API
 

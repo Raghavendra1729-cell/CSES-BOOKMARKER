@@ -57,6 +57,14 @@
     return typeof value === "string" && value.trim().length > 0;
   }
 
+  function hasOnlyKeys(value, keys) {
+    return Object.keys(value).every((key) => keys.includes(key));
+  }
+
+  function stringList(value, maxItems) {
+    return Array.isArray(value) && value.length <= maxItems && value.every(nonEmpty);
+  }
+
   function validate(value, accepted) {
     if (!value || typeof value !== "object" || Array.isArray(value)) {
       return "Response must be an object.";
@@ -64,6 +72,9 @@
     if (!nonEmpty(value.verdict_summary)) return "Verdict summary is missing.";
 
     if (!accepted) {
+      if (!hasOnlyKeys(value, ["verdict_summary", "tiny_hint"])) {
+        return "Rejected review has unexpected fields.";
+      }
       if (!nonEmpty(value.tiny_hint)) return "Tiny hint is missing.";
       const leak = JSON.stringify(value).toLowerCase();
       if (/```|#include|\bdef\s+\w+\s*\(|\bfunction\s+\w+\s*\(|\bpublic\s+static\s+void\b|\bfor\s*\(|\bwhile\s*\(/.test(leak)) {
@@ -73,11 +84,15 @@
     }
 
     const current = value.current_analysis;
+    if (!hasOnlyKeys(value, ["verdict_summary", "current_analysis", "code_quality", "improvements", "approaches"])) {
+      return "Accepted review has unexpected fields.";
+    }
     if (!current || !nonEmpty(current.correctness) || !nonEmpty(current.time_complexity) ||
-        !nonEmpty(current.space_complexity) || typeof current.is_optimal !== "boolean") {
+        !nonEmpty(current.space_complexity) || typeof current.is_optimal !== "boolean" ||
+        !hasOnlyKeys(current, ["correctness", "time_complexity", "space_complexity", "is_optimal"])) {
       return "Current solution analysis is incomplete.";
     }
-    if (!Array.isArray(value.code_quality) || !Array.isArray(value.improvements)) {
+    if (!stringList(value.code_quality, 4) || !stringList(value.improvements, 5)) {
       return "Accepted review lists are missing.";
     }
     if (!Array.isArray(value.approaches) || value.approaches.length < 1 || value.approaches.length > 4) {
@@ -86,6 +101,9 @@
     for (const approach of value.approaches) {
       if (!approach || !["name", "idea", "time_complexity", "space_complexity", "tradeoffs", "code"].every((key) => nonEmpty(approach[key]))) {
         return "An alternative approach is incomplete.";
+      }
+      if (!hasOnlyKeys(approach, ["name", "idea", "time_complexity", "space_complexity", "tradeoffs", "code"])) {
+        return "An alternative approach has unexpected fields.";
       }
       if (approach.code.trim().length < 20) return "An alternative has no complete code.";
     }

@@ -12,6 +12,20 @@
     return PROBLEM_PREFIX + String(problemId);
   }
 
+  function fallbackResultId(submission) {
+    const text = String(submission.code || "");
+    let hash = 2166136261;
+    for (let index = 0; index < text.length; index += 1) {
+      hash ^= text.charCodeAt(index);
+      hash = Math.imul(hash, 16777619);
+    }
+    return [
+      "p" + (submission.problem_id || "x"),
+      String(submission.verdict || "").replace(/\s+/g, "").slice(0, 12) || "unknown",
+      (hash >>> 0).toString(36),
+    ].join("-");
+  }
+
   function localGet(keys) {
     return new Promise((resolve) => {
       chrome.storage.local.get(keys, (res) => resolve(res || {}));
@@ -47,6 +61,8 @@
       failed_test: sub.failed_test != null ? sub.failed_test : null,
       time_ms: sub.time_ms != null ? sub.time_ms : null,
       memory_kb: sub.memory_kb != null ? sub.memory_kb : null,
+      constraints: sub.constraints ? String(sub.constraints).slice(0, 2400) : null,
+      samples: sub.samples ? String(sub.samples).slice(0, 2400) : null,
       // Keep code so a cached re-open still has context if needed
       code: sub.code ? String(sub.code).slice(0, 20000) : "",
     };
@@ -86,27 +102,38 @@
     if (keys.length <= MAX_ENTRIES) return;
 
     const items = keys
-      .map((k) => ({ key: k, savedAt: (all[k] && all[k].savedAt) || 0 }))
+      .map((key) => ({
+        key,
+        resultId: key.slice(RESULT_PREFIX.length),
+        problemId: all[key] && all[key].problem_id,
+        savedAt: (all[key] && all[key].savedAt) || 0,
+      }))
       .sort((a, b) => a.savedAt - b.savedAt);
 
-    const drop = items.slice(0, keys.length - MAX_ENTRIES).map((x) => x.key);
-    if (drop.length) await localRemove(drop);
+    const expired = items.slice(0, keys.length - MAX_ENTRIES);
+    if (!expired.length) return;
+
+    const drop = expired.map((item) => item.key);
+    // Only remove a problem pointer when it still targets the entry being
+    // pruned. A newer review for the same problem must remain reachable.
+    expired.forEach((item) => {
+      if (!item.problemId) return;
+      const pointer = all[problemKey(item.problemId)];
+      if (pointer && String(pointer.result_id) === item.resultId) {
+        drop.push(problemKey(item.problemId));
+      }
+    });
+    await localRemove(drop);
   }
 
   async function save(submission, data) {
     const sub = slimSubmission(submission);
     const resultId = sub.result_id;
     if (!resultId) {
-      // Fallback key from problem + hash of code length/verdict
-      sub.result_id =
-        "p" +
-        (sub.problem_id || "x") +
-        "-" +
-        String(sub.verdict || "")
-          .replace(/\s+/g, "")
-          .slice(0, 12) +
-        "-" +
-        String((sub.code || "").length);
+      // Result pages normally have an ID. Keep the rare fallback stable and
+      // content-based so two submissions with equal-length source do not
+      // overwrite one another.
+      sub.result_id = fallbackResultId(sub);
     }
 
     const rid = String(sub.result_id);
@@ -142,5 +169,6 @@
     save,
     resultKey,
     problemKey,
+    fallbackResultId,
   };
 })(typeof self !== "undefined" ? self : globalThis);

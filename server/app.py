@@ -43,6 +43,8 @@ class ReviewRequest(BaseModel):
     time_limit: str | None = None
     memory_limit: str | None = None
     problem_statement: str | None = None
+    constraints: str | None = None
+    samples: str | None = None
     code: str = Field(default="", min_length=1)
     result_id: str | None = None
 
