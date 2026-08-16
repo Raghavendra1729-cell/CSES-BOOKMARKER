@@ -2,7 +2,13 @@
   "private": true,
   "scripts": {
     "test": "vitest run",
-    "check": "node --check background.js && node --check content.js && node --check popup.js && node --check storage.js && node --check timer.js && node --check reviewer/hf-client.js && node --check reviewer/panel.js && node --check reviewer/problem-context.js && node --check reviewer/prompts.js && node --check reviewer/review-cache.js && node --check reviewer/schema.js && node --check reviewer/scrape.js"
+    "check": "node --check background.js && node --check content.js && node --check popup.js && node --check storage.js && node --check timer.js && node --check reviewer/hf-client.js && node --check reviewer/panel.js && node --check reviewer/problem-context.js && node --check reviewer/prompts.js && node --check reviewer/request-key.js && node --check reviewer/review-cache.js && node --check reviewer/schema.js && node --check reviewer/scrape.js"
   },
-  "devDependencies": { "vitest": "^3.2.4", "jsdom": "^26.1.0" }
+  "devDependencies": {
+    "jsdom": "^26.1.0",
+    "vitest": "^3.2.4"
+  },
+  "overrides": {
+    "nanoid": "^3.3.18"
+  }
 }

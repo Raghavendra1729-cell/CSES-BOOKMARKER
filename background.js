@@ -4,7 +4,8 @@ importScripts(
   "reviewer/prompts.js",
   "reviewer/hf-client.js",
   "reviewer/review-cache.js",
-  "reviewer/problem-context.js"
+  "reviewer/problem-context.js",
+  "reviewer/request-key.js"
 );
 
 const PREFIX = "csesbm:";
@@ -16,6 +17,7 @@ const DEFAULT_REVIEW_SETTINGS = {
   baseUrl: CSESReviewHF.DEFAULTS.baseUrl,
 };
 const activeReviews = new Map();
+const inFlightReviews = new Map();
 const problemContextCache = new Map();
 let metricWrite = Promise.resolve();
 
@@ -131,7 +133,7 @@ async function fetchProblemContext(submission, signal) {
   return { ...submission, ...context };
 }
 
-async function postReview(submission, options) {
+async function performReview(submission, options) {
   options = options || {};
   const force = Boolean(options.force);
   const requestId = options.requestId || crypto.randomUUID();
@@ -198,10 +200,31 @@ async function postReview(submission, options) {
   }
 }
 
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+function postReview(submission, options) {
+  const key = CSESReviewRequestKey.forSubmission(submission);
+  const existing = inFlightReviews.get(key);
+  if (existing) return existing;
+
+  const task = performReview(submission, options);
+  inFlightReviews.set(key, task);
+  task.finally(() => {
+    if (inFlightReviews.get(key) === task) inFlightReviews.delete(key);
+  });
+  return task;
+}
+
+function isCsesSender(sender) {
+  return Boolean(sender && sender.tab && /^https:\/\/cses\.fi\//.test(sender.tab.url || ""));
+}
+
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!message || !message.type) return;
 
   if (message.type === "REVIEW_SUBMISSION") {
+    if (!isCsesSender(sender)) {
+      sendResponse({ ok: false, error: "Reviews can only be requested from CSES result pages." });
+      return;
+    }
     postReview(message.submission || {}, {
       force: Boolean(message.force),
       requestId: message.requestId,
@@ -210,6 +233,10 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 
   if (message.type === "CANCEL_REVIEW") {
+    if (!isCsesSender(sender)) {
+      sendResponse({ ok: false });
+      return;
+    }
     const controller = activeReviews.get(message.requestId);
     if (controller) controller.abort();
     sendResponse({ ok: true });
@@ -217,6 +244,10 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 
   if (message.type === "GET_CACHED_REVIEW") {
+    if (!isCsesSender(sender)) {
+      sendResponse({ ok: false, error: "Saved reviews can only be opened on CSES." });
+      return;
+    }
     CSESReviewCache.getCached(message.submission || { result_id: message.resultId, problem_id: message.problemId })
       .then((cached) => {
         if (!cached || cached.schemaVersion < 3 || !cached.data) {
