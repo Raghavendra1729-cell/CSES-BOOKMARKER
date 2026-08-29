@@ -19,6 +19,8 @@ describe("CSES problem context extraction", () => {
     const result = context.CSESReviewProblemContext.extract(html);
     expect(result.problem_statement).toContain("Find the answer for n.");
     expect(result.problem_statement).not.toContain("Many unrelated tasks");
+    expect(result.problem_statement).not.toContain("1 <= n <= 10^6");
+    expect(result.problem_statement).not.toContain("Example");
     expect(result.constraints).toContain("Time limit: 1.00 s");
     expect(result.constraints).toContain("1 <= n <= 10^6");
     expect(result.samples).toContain("Example");

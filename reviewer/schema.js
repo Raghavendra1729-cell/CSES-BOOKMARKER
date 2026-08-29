@@ -1,6 +1,18 @@
 // Shared single-response review contract. Dependency-free for extension tests.
 (function (global) {
-  const VERSION = 3;
+  const VERSION = 4;
+
+  const limits = {
+    verdictSummary: 240,
+    tinyHint: 280,
+    correctness: 600,
+    complexity: 120,
+    listItem: 240,
+    approachName: 120,
+    approachIdea: 600,
+    tradeoffs: 360,
+    code: 8000,
+  };
 
   const schemas = {
     accepted: {
@@ -20,12 +32,10 @@
             is_optimal: { type: "boolean" },
           },
         },
-        code_quality: { type: "array", items: { type: "string" }, maxItems: 4 },
-        improvements: { type: "array", items: { type: "string" }, maxItems: 5 },
+        code_quality: { type: "array", items: { type: "string" } },
+        improvements: { type: "array", items: { type: "string" } },
         approaches: {
           type: "array",
-          minItems: 1,
-          maxItems: 4,
           items: {
             type: "object",
             additionalProperties: false,
@@ -57,6 +67,10 @@
     return typeof value === "string" && value.trim().length > 0;
   }
 
+  function within(value, maximum) {
+    return nonEmpty(value) && value.length <= maximum;
+  }
+
   function hasOnlyKeys(value, keys) {
     return Object.keys(value).every((key) => keys.includes(key));
   }
@@ -69,13 +83,13 @@
     if (!value || typeof value !== "object" || Array.isArray(value)) {
       return "Response must be an object.";
     }
-    if (!nonEmpty(value.verdict_summary)) return "Verdict summary is missing.";
+    if (!within(value.verdict_summary, limits.verdictSummary)) return "Verdict summary is missing or too long.";
 
     if (!accepted) {
       if (!hasOnlyKeys(value, ["verdict_summary", "tiny_hint"])) {
         return "Rejected review has unexpected fields.";
       }
-      if (!nonEmpty(value.tiny_hint)) return "Tiny hint is missing.";
+      if (!within(value.tiny_hint, limits.tinyHint)) return "Tiny hint is missing or too long.";
       const leak = JSON.stringify(value).toLowerCase();
       if (/```|#include|\bdef\s+\w+\s*\(|\bfunction\s+\w+\s*\(|\bpublic\s+static\s+void\b|\bfor\s*\(|\bwhile\s*\(/.test(leak)) {
         return "Rejected review contains solution-like code.";
@@ -87,19 +101,25 @@
     if (!hasOnlyKeys(value, ["verdict_summary", "current_analysis", "code_quality", "improvements", "approaches"])) {
       return "Accepted review has unexpected fields.";
     }
-    if (!current || !nonEmpty(current.correctness) || !nonEmpty(current.time_complexity) ||
-        !nonEmpty(current.space_complexity) || typeof current.is_optimal !== "boolean" ||
+    if (!current || !within(current.correctness, limits.correctness) || !within(current.time_complexity, limits.complexity) ||
+        !within(current.space_complexity, limits.complexity) || typeof current.is_optimal !== "boolean" ||
         !hasOnlyKeys(current, ["correctness", "time_complexity", "space_complexity", "is_optimal"])) {
       return "Current solution analysis is incomplete.";
     }
-    if (!stringList(value.code_quality, 4) || !stringList(value.improvements, 5)) {
+    if (!stringList(value.code_quality, 3) || !stringList(value.improvements, 3) ||
+        !value.code_quality.every((item) => item.length <= limits.listItem) ||
+        !value.improvements.every((item) => item.length <= limits.listItem)) {
       return "Accepted review lists are missing.";
     }
-    if (!Array.isArray(value.approaches) || value.approaches.length < 1 || value.approaches.length > 4) {
-      return "Accepted review needs 1-4 alternative approaches.";
+    if (!Array.isArray(value.approaches) || value.approaches.length !== 1) {
+      return "Accepted review needs exactly one alternative approach.";
     }
     for (const approach of value.approaches) {
-      if (!approach || !["name", "idea", "time_complexity", "space_complexity", "tradeoffs", "code"].every((key) => nonEmpty(approach[key]))) {
+      if (!approach || !within(approach.name, limits.approachName) ||
+          !within(approach.idea, limits.approachIdea) ||
+          !within(approach.time_complexity, limits.complexity) ||
+          !within(approach.space_complexity, limits.complexity) ||
+          !within(approach.tradeoffs, limits.tradeoffs) || !within(approach.code, limits.code)) {
         return "An alternative approach is incomplete.";
       }
       if (!hasOnlyKeys(approach, ["name", "idea", "time_complexity", "space_complexity", "tradeoffs", "code"])) {
@@ -118,5 +138,5 @@
     };
   }
 
-  global.CSESReviewSchema = { VERSION, schemas, validate, jsonSchema };
+  global.CSESReviewSchema = { VERSION, limits, schemas, validate, jsonSchema };
 })(typeof self !== "undefined" ? self : globalThis);

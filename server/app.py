@@ -29,7 +29,7 @@ app.add_middleware(
 
 class ReviewRequest(BaseModel):
     requestId: str | None = None
-    schemaVersion: int = 3
+    schemaVersion: int = 4
     force: bool = False
     problem_id: str | None = None
     problem_name: str | None = None

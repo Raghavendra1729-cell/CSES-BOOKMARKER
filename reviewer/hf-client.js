@@ -2,9 +2,11 @@
 (function (global) {
   const DEFAULTS = {
     baseUrl: "https://router.huggingface.co/v1",
-    // Keep the browser client aligned with the documented and optional-server
-    // provider variant. A different suffix can route to a different model.
-    model: "MiniMaxAI/MiniMax-M3:novita",
+    modelId: "MiniMaxAI/MiniMax-M3",
+    // Fireworks currently supports strict structured output for MiniMax-M3;
+    // the former Novita route does not. This is still routed and billed by HF.
+    model: "MiniMaxAI/MiniMax-M3:fireworks-ai",
+    maxTokens: { accepted: 2400, rejected: 220 },
   };
 
   function extractJson(text) {
@@ -55,9 +57,12 @@
               { role: "system", content: global.CSESReviewPrompts.SYSTEM_PROMPT },
               { role: "user", content: global.CSESReviewPrompts.buildPrompt(payload) },
             ],
-            max_tokens: accepted ? 6500 : 500,
+            max_tokens: accepted ? DEFAULTS.maxTokens.accepted : DEFAULTS.maxTokens.rejected,
             temperature: 0.15,
-            response_format: { type: "json_object" },
+            response_format: {
+              type: "json_schema",
+              json_schema: global.CSESReviewSchema.jsonSchema(accepted),
+            },
           }),
           signal: controller.signal,
         }
@@ -73,7 +78,14 @@
         throw error;
       }
 
-      const data = extractJson(messageContent(json && json.choices && json.choices[0]));
+      const choice = json && json.choices && json.choices[0];
+      if (!choice) throw new Error("Hugging Face returned no review choice.");
+      if (choice.finish_reason === "length") {
+        const error = new Error("The review exceeded its output limit. Shorten the submission and try again.");
+        error.failureType = "length";
+        throw error;
+      }
+      const data = extractJson(messageContent(choice));
       const problem = global.CSESReviewSchema.validate(data, accepted);
       if (problem) {
         const error = new Error(problem);
@@ -86,6 +98,9 @@
           ms: Date.now() - startedAt,
           requestCount: 1,
           model: (json && json.model) || model,
+          promptTokens: Number(json && json.usage && json.usage.prompt_tokens) || null,
+          completionTokens: Number(json && json.usage && json.usage.completion_tokens) || null,
+          totalTokens: Number(json && json.usage && json.usage.total_tokens) || null,
         },
       };
     } catch (error) {

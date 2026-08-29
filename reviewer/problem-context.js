@@ -54,11 +54,15 @@
     // Sample blocks contain their own Input and Output headings, so they
     // cannot use the generic heading splitter above.
     const sampleMatch = plain.match(/(?:^|\n)(?:Example|Sample)\b[\s\S]*$/i);
+    const supplementalStart = plain.search(/(?:^|\n)(?:Constraints|Example|Sample)\b/i);
+    const statement = supplementalStart >= 0 ? plain.slice(0, supplementalStart).trim() : plain;
     const pageLimits = textFromHtml(constraintsHtml);
     const constraints = [pageLimits, take("Constraints")].filter(Boolean).join("\n\n");
 
     return {
-      problem_statement: plain.slice(0, 11000),
+      // Constraints and samples are supplied separately. Removing them here
+      // prevents paying for the same context twice in every review.
+      problem_statement: statement.slice(0, 8000),
       constraints: constraints.slice(0, 2400) || "Not explicitly listed",
       samples: (sampleMatch ? sampleMatch[0].trim() : "").slice(0, 2400) || "Not explicitly listed",
     };

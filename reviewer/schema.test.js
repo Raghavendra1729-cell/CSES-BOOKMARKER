@@ -26,6 +26,18 @@ describe("single review schema", () => {
     expect(schema.validate(review, true)).toMatch(/complete code/);
   });
 
+  it("allows exactly one accepted alternative to bound output cost", () => {
+    const approach = { name: "Scan", idea: "Scan once", time_complexity: "O(n)", space_complexity: "O(1)", tradeoffs: "Simple", code: "int main() { return 0; }" };
+    const review = {
+      verdict_summary: "Accepted",
+      current_analysis: { correctness: "Correct", time_complexity: "O(n)", space_complexity: "O(1)", is_optimal: true },
+      code_quality: [],
+      improvements: [],
+      approaches: [approach, { ...approach, name: "Duplicate" }],
+    };
+    expect(schema.validate(review, true)).toMatch(/exactly one/);
+  });
+
   it("exposes strict accepted and rejected schemas", () => {
     expect(schema.jsonSchema(true).schema.additionalProperties).toBe(false);
     expect(schema.jsonSchema(false).schema.additionalProperties).toBe(false);
