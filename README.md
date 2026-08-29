@@ -11,18 +11,19 @@ Chrome extension for [CSES Problem Set](https://cses.fi/problemset/):
 
 Reviews are never automatic. On a CSES result page, click **Review submission**.
 The extension makes exactly one Hugging Face generation request using
-`MiniMaxAI/MiniMax-M3:novita`.
+`MiniMaxAI/MiniMax-M3:fireworks-ai`.
 
 - **Rejected:** verdict summary plus one small hint. No solution, algorithm name,
   pseudocode, steps, or replacement code.
 - **Accepted:** correctness, time/space complexity, code-quality improvements, and
-  1–4 useful alternative approaches with complete code. Alternatives are shown
-  directly in the panel.
+  one useful alternative approach with complete code. It is shown directly in
+  the panel.
 - **Saved review:** clicking **Open review** reads the local cache and makes no
   model request. **Review again** explicitly makes one new request.
 
 MiniMax-M3 is the only review model; there is no separate quick-model call or
-automatic repair/retry call.
+automatic repair/retry call. The request stays inside Hugging Face's router and
+uses its Fireworks route because that route supports strict JSON Schema output.
 
 ## Setup
 
@@ -39,9 +40,15 @@ The request goes directly to Hugging Face's OpenAI-compatible router:
 ```text
 CSES result → Review submission button
   → POST https://router.huggingface.co/v1/chat/completions
-  → MiniMaxAI/MiniMax-M3:novita
+  → MiniMaxAI/MiniMax-M3:fireworks-ai
   → one accepted review or one tiny rejected hint
 ```
+
+Accepted reviews are capped at 2,400 output tokens and rejected reviews at 220.
+Problem constraints and samples are sent once instead of being duplicated in
+the statement, and oversized source is clipped from the middle so both the
+declarations and final logic remain visible. The review panel shows the actual
+token count reported by Hugging Face.
 
 ## Persistence and privacy
 
@@ -78,4 +85,4 @@ pip install -r requirements.txt
 python -m server.app
 ```
 
-The optional API uses the same one-call MiniMax-M3 behavior.
+The optional API uses the same one-call, strict-schema MiniMax-M3 behavior.

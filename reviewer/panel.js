@@ -106,7 +106,7 @@
     body.append(
       make("div", "csesbm-rv-spinner"),
       make("h3", null, "MiniMax is reviewing your submission"),
-      make("p", null, "One request only. Accepted solutions take longer because alternatives include complete code.")
+      make("p", null, "One Hugging Face request · strict JSON · one complete alternative.")
     );
     node.append(header("Submission review", "Working", options), body);
     resize(node);
@@ -183,6 +183,14 @@
 
     if (options && options.fromCache) {
       body.prepend(make("div", "csesbm-rv-cache-note", "Saved review · no new model request"));
+    } else if (options && options.timing) {
+      const timing = options.timing;
+      const details = [];
+      if (timing.totalTokens) details.push(timing.totalTokens + " tokens");
+      if (timing.ms) details.push((timing.ms / 1000).toFixed(1) + " s");
+      if (details.length) {
+        body.prepend(make("div", "csesbm-rv-cache-note", "Hugging Face · " + details.join(" · ")));
+      }
     }
     node.append(body);
     resize(node);

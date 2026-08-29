@@ -466,8 +466,8 @@
         setReviewStatus(
           "OK · " +
             (d.model || "model set") +
-            " · via " +
-            (d.token_source || "token") +
+            " · " + (d.provider || "provider ready") +
+            " · via " + (d.token_source || "token") +
             " · direct HF"
         );
       });

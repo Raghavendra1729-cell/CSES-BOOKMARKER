@@ -176,6 +176,9 @@ async function performReview(submission, options) {
       requestCount: 1,
       model: result.timing.model,
       ms: result.timing.ms,
+      promptTokens: result.timing.promptTokens,
+      completionTokens: result.timing.completionTokens,
+      totalTokens: result.timing.totalTokens,
     });
     return {
       ok: true,
@@ -324,12 +327,26 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           sendResponse({ ok: false, error: "No HF token. Paste one in the popup and click Save." });
           return;
         }
+        const authResponse = await fetch("https://huggingface.co/api/whoami-v2", {
+          headers: { Authorization: "Bearer " + settings.hfToken.trim() },
+        });
+        if (!authResponse.ok) {
+          sendResponse({ ok: false, error: "Hugging Face rejected this token (HTTP " + authResponse.status + ")." });
+          return;
+        }
         const base = DEFAULT_REVIEW_SETTINGS.baseUrl.replace(/\/$/, "");
-        const response = await fetch(base + "/models", {
+        const response = await fetch(base + "/models/" + CSESReviewHF.DEFAULTS.modelId, {
           headers: { Authorization: "Bearer " + settings.hfToken.trim() },
         });
         if (!response.ok) {
           sendResponse({ ok: false, error: "Hugging Face API check failed (HTTP " + response.status + ")." });
+          return;
+        }
+        const metadata = await response.json();
+        const providers = (metadata && metadata.data && metadata.data.providers) || [];
+        const selected = providers.find((provider) => provider.provider === "fireworks-ai");
+        if (!selected || selected.status !== "live" || !selected.supports_structured_output) {
+          sendResponse({ ok: false, error: "The structured MiniMax provider is not currently available." });
           return;
         }
         sendResponse({
@@ -339,6 +356,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             base_url: base,
             http_status: response.status,
             token_source: settings._tokenSource,
+            provider: selected.provider,
           },
         });
       } catch (error) {

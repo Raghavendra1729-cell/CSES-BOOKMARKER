@@ -336,7 +336,7 @@
     launch.className = "csesbm-review-launch";
     launch.type = "button";
     launch.textContent = "Review submission";
-    launch.title = "Ask MiniMax to review this submission once";
+    launch.title = "Ask MiniMax for one token-efficient review";
     document.body.appendChild(launch);
 
     chrome.runtime.sendMessage({ type: "GET_CACHED_REVIEW", submission }, (response) => {
@@ -371,7 +371,7 @@
     const requestId = crypto.randomUUID();
     activeRequestId = requestId;
     panel.renderLoading("Reviewing submission…", { onClose: cancelReview });
-    chrome.runtime.sendMessage({ type: "REVIEW_SUBMISSION", submission, force: Boolean(force), requestId, schemaVersion: 3 }, (resp) => {
+    chrome.runtime.sendMessage({ type: "REVIEW_SUBMISSION", submission, force: Boolean(force), requestId, schemaVersion: 4 }, (resp) => {
       if (activeRequestId !== requestId) return;
       activeRequestId = null;
       if (chrome.runtime.lastError || !resp || !resp.ok) {
@@ -390,6 +390,7 @@
       }
       panel.renderReview(resp.data, submission, {
         fromCache: Boolean(resp.fromCache),
+        timing: resp.timing,
         onClose: cancelReview,
         onReviewAgain: () => requestReview(submission, panel, true),
       });

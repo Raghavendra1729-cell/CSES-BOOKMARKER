@@ -39,4 +39,16 @@ describe("review panel", () => {
     expect(window.document.querySelector("pre")).toBeNull();
     expect(window.document.querySelector(".csesbm-rv-approach")).toBeNull();
   });
+
+  it("shows actual Hugging Face token usage and latency", () => {
+    window.CSESReviewPanel.renderReview({
+      verdict_summary: "Wrong Answer.",
+      tiny_hint: "Check the boundary.",
+    }, { accepted: false, verdict: "Wrong Answer" }, {
+      timing: { totalTokens: 321, ms: 2450 },
+    });
+
+    expect(window.document.querySelector(".csesbm-rv-cache-note").textContent).toContain("321 tokens");
+    expect(window.document.querySelector(".csesbm-rv-cache-note").textContent).toContain("2.5 s");
+  });
 });
