@@ -1,17 +1,6 @@
-# Secrets — never commit
+# Secrets - never commit
 .env
 config.local.js
-
-# Python
-.venv/
-venv/
-__pycache__/
-*.py[cod]
-*$py.class
-*.egg-info/
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
 
 # OS / editor
 .DS_Store
@@ -23,4 +12,3 @@ __pycache__/
 # Local logs / caches
 node_modules/
 *.log
-.review-cache/
