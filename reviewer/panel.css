@@ -74,6 +74,7 @@
 .csesbm-rv-close:hover,
 .csesbm-rv-secondary:hover,
 .csesbm-rv-copy-btn:hover { border-color: var(--accent); }
+.csesbm-review button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .csesbm-rv-body { flex: 1; overflow: auto; padding: 16px 18px 34px; }
 .csesbm-rv-section { margin: 0 0 14px; }
 .csesbm-rv-section > .csesbm-rv-h {

@@ -9,17 +9,34 @@
 
   const keyFor = (id) => PREFIX + id;
 
+  function storageError() {
+    const error = chrome.runtime && chrome.runtime.lastError;
+    return error ? new Error(error.message || "Chrome storage failed.") : null;
+  }
+
+  function text(value, maximum) {
+    return String(value == null ? "" : value).slice(0, maximum);
+  }
+
   function normalize(b) {
+    if (!b || typeof b !== "object" || Array.isArray(b)) {
+      throw new TypeError("Bookmark must be an object.");
+    }
+    const id = String(b.id == null ? "" : b.id).trim();
+    if (!/^\d{1,12}$/.test(id)) throw new TypeError("Invalid CSES problem ID.");
+    const addedAt = Number(b.addedAt);
+    const timeSpentMs = Number(b.timeSpentMs);
     return {
-      id: String(b.id),
-      name: b.name || "",
-      category: b.category || "",
-      url: b.url || `https://cses.fi/problemset/task/${b.id}`,
-      note: b.note || "",
-      addedAt: b.addedAt || Date.now(),
+      id,
+      name: text(b.name, 200),
+      category: text(b.category, 120),
+      // Never trust a URL from Sync or an imported backup.
+      url: `https://cses.fi/problemset/task/${id}`,
+      note: text(b.note, 1000),
+      addedAt: Number.isFinite(addedAt) && addedAt > 0 ? addedAt : Date.now(),
       status: b.status === "done" ? "done" : "todo",
-      csesSolved: Boolean(b.csesSolved),
-      timeSpentMs: b.timeSpentMs != null ? b.timeSpentMs : null,
+      csesSolved: b.csesSolved === true,
+      timeSpentMs: b.timeSpentMs != null && Number.isFinite(timeSpentMs) && timeSpentMs >= 0 ? timeSpentMs : null,
     };
   }
 
@@ -34,8 +51,28 @@
     return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`;
   }
 
-  const rawGetAll = () =>
-    new Promise((resolve) => AREA.get(null, (all) => resolve(all || {})));
+  const rawGet = (keys) =>
+    new Promise((resolve, reject) => AREA.get(keys, (result) => {
+      const error = storageError();
+      if (error) reject(error);
+      else resolve(result || {});
+    }));
+
+  const rawGetAll = () => rawGet(null);
+
+  const rawSet = (values) =>
+    new Promise((resolve, reject) => AREA.set(values, () => {
+      const error = storageError();
+      if (error) reject(error);
+      else resolve();
+    }));
+
+  const rawRemove = (keys) =>
+    new Promise((resolve, reject) => AREA.remove(keys, () => {
+      const error = storageError();
+      if (error) reject(error);
+      else resolve();
+    }));
 
   async function migrateIfNeeded() {
     const all = await rawGetAll();
@@ -43,19 +80,24 @@
     if (!legacy || typeof legacy !== "object") return;
     const toSet = {};
     Object.values(legacy).forEach((b) => {
-      if (b && b.id != null) toSet[keyFor(b.id)] = normalize(b);
+      try {
+        const bookmark = normalize(b);
+        toSet[keyFor(bookmark.id)] = bookmark;
+      } catch (_) {
+        // Ignore corrupt legacy entries instead of blocking every bookmark.
+      }
     });
-    if (Object.keys(toSet).length) {
-      await new Promise((res) => AREA.set(toSet, res));
-    }
-    await new Promise((res) => AREA.remove(LEGACY_KEY, res));
+    if (Object.keys(toSet).length) await rawSet(toSet);
+    await rawRemove(LEGACY_KEY);
   }
 
   async function getAll() {
     const all = await rawGetAll();
     return Object.keys(all)
       .filter((k) => k.startsWith(PREFIX))
-      .map((k) => normalize(all[k]));
+      .flatMap((k) => {
+        try { return [normalize(all[k])]; } catch (_) { return []; }
+      });
   }
 
   async function getMap() {
@@ -67,19 +109,14 @@
 
   async function get(id) {
     const k = keyFor(id);
-    const res = await new Promise((r) => AREA.get(k, r));
-    return res[k] ? normalize(res[k]) : null;
+    const res = await rawGet(k);
+    if (!res[k]) return null;
+    try { return normalize(res[k]); } catch (_) { return null; }
   }
 
   function put(b) {
     const nb = normalize(b);
-    return new Promise((resolve, reject) => {
-      AREA.set({ [keyFor(nb.id)]: nb }, () => {
-        const err = chrome.runtime.lastError;
-        if (err) reject(err);
-        else resolve(nb);
-      });
-    });
+    return rawSet({ [keyFor(nb.id)]: nb }).then(() => nb);
   }
 
   async function patch(id, partial) {
@@ -88,13 +125,13 @@
     return put({ ...cur, ...partial, id });
   }
 
-  const remove = (id) =>
-    new Promise((resolve) => AREA.remove(keyFor(id), resolve));
+  const remove = (id) => rawRemove(keyFor(id));
 
   async function clearAll() {
     const all = await rawGetAll();
     const keys = Object.keys(all).filter((k) => k.startsWith(PREFIX));
-    return new Promise((resolve) => AREA.remove(keys, resolve));
+    if (!keys.length) return;
+    await rawRemove(keys);
   }
 
   globalThis.CSESBM = {

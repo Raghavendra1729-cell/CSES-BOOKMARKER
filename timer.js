@@ -8,19 +8,44 @@
 
   const keyFor = (id) => PREFIX + id;
 
+  function normalize(state) {
+    if (!state || typeof state !== "object" || Array.isArray(state)) return null;
+    if (!["running", "paused", "stopped"].includes(state.status)) return null;
+    const accumulatedMs = Number(state.accumulatedMs);
+    if (!Number.isFinite(accumulatedMs) || accumulatedMs < 0) return null;
+    const next = { status: state.status, accumulatedMs };
+    if (state.status === "running") {
+      const lastResumeAt = Number(state.lastResumeAt);
+      if (!Number.isFinite(lastResumeAt) || lastResumeAt <= 0) return null;
+      next.lastResumeAt = lastResumeAt;
+    }
+    if (state.status === "stopped") next.finalMs = accumulatedMs;
+    return next;
+  }
+
   function get(id) {
     const k = keyFor(id);
-    return new Promise((resolve) => AREA.get(k, (res) => resolve(res[k] || null)));
+    return new Promise((resolve, reject) => AREA.get(k, (res) => {
+      const error = chrome.runtime.lastError;
+      if (error) reject(new Error(error.message));
+      else resolve(normalize(res[k]));
+    }));
   }
 
   function set(id, state) {
-    return new Promise((resolve) => AREA.set({ [keyFor(id)]: state }, resolve));
+    const next = normalize(state);
+    if (!next) return Promise.reject(new TypeError("Invalid timer state."));
+    return new Promise((resolve, reject) => AREA.set({ [keyFor(id)]: next }, () => {
+      const error = chrome.runtime.lastError;
+      if (error) reject(new Error(error.message));
+      else resolve(next);
+    }));
   }
 
   function elapsedMs(state) {
     if (!state) return 0;
     if (state.status === "running") {
-      return state.accumulatedMs + (Date.now() - state.lastResumeAt);
+      return state.accumulatedMs + Math.max(0, Date.now() - state.lastResumeAt);
     }
     return state.accumulatedMs;
   }
@@ -29,8 +54,7 @@
     const existing = await get(id);
     if (existing) return existing;
     const state = { status: "running", accumulatedMs: 0, lastResumeAt: Date.now() };
-    await set(id, state);
-    return state;
+    return set(id, state);
   }
 
   async function pause(id) {
@@ -41,16 +65,14 @@
       status: "paused",
       accumulatedMs: state.accumulatedMs + (Date.now() - state.lastResumeAt),
     };
-    await set(id, next);
-    return next;
+    return set(id, next);
   }
 
   async function resume(id) {
     const state = await get(id);
     if (!state || state.status !== "paused") return state;
     const next = { ...state, status: "running", lastResumeAt: Date.now() };
-    await set(id, next);
-    return next;
+    return set(id, next);
   }
 
   // Only way a timer permanently stops: an Accepted verdict (or a
@@ -60,8 +82,7 @@
     if (state && state.status === "stopped") return state;
     const finalMs = elapsedMs(state);
     const next = { status: "stopped", accumulatedMs: finalMs, finalMs };
-    await set(id, next);
-    return next;
+    return set(id, next);
   }
 
   globalThis.CSESTimer = { get, set, elapsedMs, ensureStarted, pause, resume, stop };

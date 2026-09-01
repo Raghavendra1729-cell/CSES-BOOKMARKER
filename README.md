@@ -1,4 +1,4 @@
-# CSES Bookmarker + MiniMax Reviewer
+# CSES Bookmarker + GLM-5.3 Reviewer
 
 Chrome extension for [CSES Problem Set](https://cses.fi/problemset/):
 
@@ -11,7 +11,7 @@ Chrome extension for [CSES Problem Set](https://cses.fi/problemset/):
 
 Reviews are never automatic. On a CSES result page, click **Review submission**.
 The extension makes exactly one Hugging Face generation request using
-`MiniMaxAI/MiniMax-M3:fireworks-ai`.
+`zai-org/GLM-5.3:fireworks-ai`.
 
 - **Rejected:** verdict summary plus one small hint. No solution, algorithm name,
   pseudocode, steps, or replacement code.
@@ -21,9 +21,12 @@ The extension makes exactly one Hugging Face generation request using
 - **Saved review:** clicking **Open review** reads the local cache and makes no
   model request. **Review again** explicitly makes one new request.
 
-MiniMax-M3 is the only review model; there is no separate quick-model call or
-automatic repair/retry call. The request stays inside Hugging Face's router and
-uses its Fireworks route because that route supports strict JSON Schema output.
+GLM-5.3 is the only review model; there is no separate quick-model call,
+automatic repair/retry call, or local review service. The request stays
+inside Hugging Face's router and uses its Fireworks route because that route
+supports strict JSON Schema output. GLM-5.3 was selected for its strong current
+coding and program-reasoning results; accepted reviews use high reasoning effort,
+while rejected submissions remain limited to a tiny learning-safe hint.
 
 ## Setup
 
@@ -32,15 +35,15 @@ uses its Fireworks route because that route supports strict JSON Schema output.
 3. Open the extension popup, paste a Hugging Face token with Inference Providers
    access, click **Save**, then **Test API**.
 
-Chrome extensions cannot read `.env`. The popup is the only token input: paste
-the token, click **Save**, and use **Clear token** when you want to remove it.
+The popup is the only token input: paste the token, click **Save**, and use
+**Clear token** when you want to remove it.
 
 The request goes directly to Hugging Face's OpenAI-compatible router:
 
 ```text
 CSES result → Review submission button
   → POST https://router.huggingface.co/v1/chat/completions
-  → MiniMaxAI/MiniMax-M3:fireworks-ai
+  → zai-org/GLM-5.3:fireworks-ai
   → one accepted review or one tiny rejected hint
 ```
 
@@ -67,22 +70,7 @@ token count reported by Hugging Face.
 ## Development checks
 
 ```bash
-npm install
+npm ci
 npm test
 npm run check
-python -m unittest server.app_test
 ```
-
-## Optional local Python API
-
-Normal extension use does not need a local server. For CLI/dev use only:
-
-```bash
-cp .env.example .env
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-python -m server.app
-```
-
-The optional API uses the same one-call, strict-schema MiniMax-M3 behavior.

@@ -20,6 +20,7 @@
     btn.title = active
       ? "Remove from CSES Bookmarker"
       : "Save to CSES Bookmarker";
+    btn.setAttribute("aria-label", btn.title);
   }
 
   function makeStarButton(id, active) {
@@ -60,12 +61,20 @@
     opts = opts || {};
     const btn = makeStarButton(id, active);
     if (opts.extraClass) btn.classList.add(opts.extraClass);
-    btn.addEventListener("click", (e) => {
+    btn.addEventListener("click", async (e) => {
       e.preventDefault();
       e.stopPropagation();
-      onToggle(id, { ...meta, csesSolved: meta.getSolved() }, btn).then((active) => {
+      if (btn.disabled) return;
+      btn.disabled = true;
+      try {
+        const active = await onToggle(id, { ...meta, csesSolved: meta.getSolved() }, btn);
         if (opts.onChange) opts.onChange(active);
-      });
+      } catch (_) {
+        btn.title = "Could not update bookmark — click to retry";
+        btn.setAttribute("aria-label", btn.title);
+      } finally {
+        btn.disabled = false;
+      }
     });
     if (opts.inside) anchorEl.appendChild(btn);
     else anchorEl.insertAdjacentElement("afterend", btn);
@@ -303,19 +312,26 @@
     }
 
     if (!submission.code || !submission.code.trim()) {
-      // Result page may still be loading code; retry briefly.
-      setTimeout(() => {
+      // Result pages can populate source code after the rest of the page.
+      // Poll briefly instead of failing after one arbitrary delay.
+      let attempts = 0;
+      const retry = () => setTimeout(() => {
+        attempts += 1;
         try {
           submission = scrape.scrapeSubmission();
         } catch {
+          if (attempts < 8) retry();
+          else panel.renderError("Could not read this result page.");
           return;
         }
         if (!submission.code || !submission.code.trim()) {
-          panel.renderError("No source code found on this result page.");
+          if (attempts < 8) retry();
+          else panel.renderError("No source code found on this result page.");
           return;
         }
         requestReview(submission, panel, force);
-      }, 600);
+      }, 500);
+      retry();
       return;
     }
 
@@ -336,7 +352,7 @@
     launch.className = "csesbm-review-launch";
     launch.type = "button";
     launch.textContent = "Review submission";
-    launch.title = "Ask MiniMax for one token-efficient review";
+    launch.title = "Ask GLM-5.3 for one focused CSES review";
     document.body.appendChild(launch);
 
     chrome.runtime.sendMessage({ type: "GET_CACHED_REVIEW", submission }, (response) => {
@@ -371,7 +387,7 @@
     const requestId = crypto.randomUUID();
     activeRequestId = requestId;
     panel.renderLoading("Reviewing submission…", { onClose: cancelReview });
-    chrome.runtime.sendMessage({ type: "REVIEW_SUBMISSION", submission, force: Boolean(force), requestId, schemaVersion: 4 }, (resp) => {
+    chrome.runtime.sendMessage({ type: "REVIEW_SUBMISSION", submission, force: Boolean(force), requestId }, (resp) => {
       if (activeRequestId !== requestId) return;
       activeRequestId = null;
       if (chrome.runtime.lastError || !resp || !resp.ok) {

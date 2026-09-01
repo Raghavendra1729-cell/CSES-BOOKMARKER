@@ -12,7 +12,6 @@ const PREFIX = "csesbm:";
 const REVIEW_SETTINGS_KEY = "csesbm:reviewSettings";
 const REVIEW_METRICS_KEY = "csesbm:reviewMetrics";
 const DEFAULT_REVIEW_SETTINGS = {
-  enabled: true,
   hfToken: "",
   baseUrl: CSESReviewHF.DEFAULTS.baseUrl,
 };
@@ -64,11 +63,10 @@ recount();
 function mergeSettings(stored) {
   const settings = {
     ...DEFAULT_REVIEW_SETTINGS,
-    ...(stored || {}),
+    hfToken: stored && typeof stored.hfToken === "string" ? stored.hfToken : "",
     // The popup does not expose a custom endpoint. Pinning it prevents a
     // stale or crafted storage value from sending the token elsewhere.
     baseUrl: DEFAULT_REVIEW_SETTINGS.baseUrl,
-    enabled: true,
   };
   if ((settings.hfToken || "").trim()) {
     settings._tokenSource = "popup";
@@ -94,7 +92,6 @@ function maskToken(token) {
 function sanitizeSettings(settings) {
   const hasToken = Boolean((settings.hfToken || "").trim());
   return {
-    enabled: true,
     hasToken,
     tokenHint: maskToken(settings.hfToken),
     tokenSource: hasToken ? settings._tokenSource || "unknown" : "none",
@@ -136,9 +133,7 @@ async function fetchProblemContext(submission, signal) {
 async function performReview(submission, options) {
   options = options || {};
   const force = Boolean(options.force);
-  const requestId = options.requestId || crypto.randomUUID();
-  const controller = new AbortController();
-  activeReviews.set(requestId, controller);
+  const controller = options.controller || new AbortController();
 
   try {
     if (!force) {
@@ -198,22 +193,44 @@ async function performReview(submission, options) {
       error: error.message || "Review failed",
       failureType: error.failureType || "unknown",
     };
-  } finally {
-    activeReviews.delete(requestId);
   }
 }
 
 function postReview(submission, options) {
-  const key = CSESReviewRequestKey.forSubmission(submission);
+  options = options || {};
+  // A forced refresh must never attach itself to a cache-eligible request.
+  const key = (options.force ? "refresh:" : "normal:") + CSESReviewRequestKey.forSubmission(submission);
+  const requestId = String(options.requestId || crypto.randomUUID()).slice(0, 128);
   const existing = inFlightReviews.get(key);
-  if (existing) return existing;
+  if (existing) {
+    existing.requestIds.add(requestId);
+    activeReviews.set(requestId, existing.controller);
+    return existing.task;
+  }
 
-  const task = performReview(submission, options);
-  inFlightReviews.set(key, task);
+  const controller = new AbortController();
+  const requestIds = new Set([requestId]);
+  activeReviews.set(requestId, controller);
+  const task = performReview(submission, { ...options, requestId, controller });
+  const entry = { controller, requestIds, task };
+  inFlightReviews.set(key, entry);
   task.finally(() => {
-    if (inFlightReviews.get(key) === task) inFlightReviews.delete(key);
+    requestIds.forEach((id) => {
+      if (activeReviews.get(id) === controller) activeReviews.delete(id);
+    });
+    if (inFlightReviews.get(key) === entry) inFlightReviews.delete(key);
   });
   return task;
+}
+
+async function fetchWithTimeout(url, init, timeoutMs) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...(init || {}), signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 function isCsesSender(sender) {
@@ -284,8 +301,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const stored = result[REVIEW_SETTINGS_KEY] || {};
         const incoming = message.settings || {};
         const next = {
-          enabled: true,
-          baseUrl: DEFAULT_REVIEW_SETTINGS.baseUrl,
           hfToken: stored.hfToken || "",
         };
         if (incoming.hfToken != null && String(incoming.hfToken).trim()) {
@@ -303,11 +318,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === "CLEAR_HF_TOKEN") {
     (async () => {
       try {
-        const result = await localGet(REVIEW_SETTINGS_KEY);
         const stored = {
-          ...(result[REVIEW_SETTINGS_KEY] || {}),
-          baseUrl: DEFAULT_REVIEW_SETTINGS.baseUrl,
-          enabled: true,
           hfToken: "",
         };
         await localSet({ [REVIEW_SETTINGS_KEY]: stored });
@@ -327,17 +338,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           sendResponse({ ok: false, error: "No HF token. Paste one in the popup and click Save." });
           return;
         }
-        const authResponse = await fetch("https://huggingface.co/api/whoami-v2", {
+        const authResponse = await fetchWithTimeout("https://huggingface.co/api/whoami-v2", {
           headers: { Authorization: "Bearer " + settings.hfToken.trim() },
-        });
+        }, 15000);
         if (!authResponse.ok) {
           sendResponse({ ok: false, error: "Hugging Face rejected this token (HTTP " + authResponse.status + ")." });
           return;
         }
         const base = DEFAULT_REVIEW_SETTINGS.baseUrl.replace(/\/$/, "");
-        const response = await fetch(base + "/models/" + CSESReviewHF.DEFAULTS.modelId, {
+        const response = await fetchWithTimeout(base + "/models/" + CSESReviewHF.DEFAULTS.modelId, {
           headers: { Authorization: "Bearer " + settings.hfToken.trim() },
-        });
+        }, 15000);
         if (!response.ok) {
           sendResponse({ ok: false, error: "Hugging Face API check failed (HTTP " + response.status + ")." });
           return;
@@ -346,7 +357,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const providers = (metadata && metadata.data && metadata.data.providers) || [];
         const selected = providers.find((provider) => provider.provider === "fireworks-ai");
         if (!selected || selected.status !== "live" || !selected.supports_structured_output) {
-          sendResponse({ ok: false, error: "The structured MiniMax provider is not currently available." });
+          sendResponse({ ok: false, error: "The structured GLM-5.3 provider is not currently available." });
           return;
         }
         sendResponse({

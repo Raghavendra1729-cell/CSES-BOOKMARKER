@@ -19,6 +19,17 @@
   stroke: #b36f00;
 }
 
+.csesbm-star:focus-visible {
+  outline: 2px solid #b36f00;
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.csesbm-star:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
 .csesbm-star.is-active svg path {
   fill: #f5a623;
   stroke: #b36f00;

@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "CSES Bookmarker",
-  "version": "1.5.0",
-  "description": "Bookmark CSES problems, track solve time, and request fast structured MiniMax reviews.",
+  "version": "1.6.0",
+  "description": "Bookmark CSES problems, track solve time, and request focused structured CSES reviews.",
   "icons": {
     "16": "icons/icon16.png",
     "32": "icons/icon32.png",

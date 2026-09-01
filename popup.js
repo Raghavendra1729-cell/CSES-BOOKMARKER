@@ -15,12 +15,6 @@
   let clearTimer = null;
   let flashTimer = null;
 
-  function escapeHtml(s) {
-    const d = document.createElement("div");
-    d.textContent = s;
-    return d.innerHTML;
-  }
-
   function flash(msg, isError) {
     flashEl.textContent = msg;
     flashEl.classList.toggle("error", Boolean(isError));
@@ -184,22 +178,37 @@
 
   async function toggleStatus(b) {
     const next = b.status === "done" ? "todo" : "done";
-    map[b.id].status = next;
-    await CSESBM.patch(b.id, { status: next });
-    render();
+    try {
+      const saved = await CSESBM.patch(b.id, { status: next });
+      if (!saved) throw new Error("Bookmark no longer exists.");
+      map[b.id] = saved;
+      render();
+    } catch (_) {
+      flash("Could not update this bookmark.", true);
+    }
   }
 
   async function saveNote(b, value) {
     if (!map[b.id]) return;
     if ((map[b.id].note || "") === value) return;
-    map[b.id].note = value;
-    await CSESBM.patch(b.id, { note: value });
+    try {
+      const saved = await CSESBM.patch(b.id, { note: value });
+      if (!saved) throw new Error("Bookmark no longer exists.");
+      map[b.id] = saved;
+    } catch (_) {
+      flash("Could not save this note.", true);
+      render();
+    }
   }
 
   async function removeItem(b) {
-    delete map[b.id];
-    await CSESBM.remove(b.id);
-    render();
+    try {
+      await CSESBM.remove(b.id);
+      delete map[b.id];
+      render();
+    } catch (_) {
+      flash("Could not remove this bookmark.", true);
+    }
   }
 
   // ---------- Export / Import ----------
@@ -227,8 +236,37 @@
 
   function isPortableLocalKey(key) {
     return (
-      /^csesbm:rev:[rp]:[A-Za-z0-9_-]+$/.test(key) ||
-      /^csesbm-timer:\d+$/.test(key)
+      /^csesbm:rev:r:[A-Za-z0-9_-]{1,80}$/.test(key) ||
+      /^csesbm:rev:p:\d{1,12}$/.test(key) ||
+      /^csesbm-timer:\d{1,12}$/.test(key)
+    );
+  }
+
+  function isPlainObject(value) {
+    return Boolean(value && typeof value === "object" && !Array.isArray(value));
+  }
+
+  function isPortableLocalValue(key, value) {
+    if (!isPlainObject(value)) return false;
+    // Keep one imported item below Chrome's local-storage per-flow budget and
+    // prevent a crafted backup from filling the extension's entire quota.
+    if (JSON.stringify(value).length > 100000) return false;
+    if (key.startsWith("csesbm-timer:")) {
+      return (
+        ["running", "paused", "stopped"].includes(value.status) &&
+        typeof value.accumulatedMs === "number" && Number.isFinite(value.accumulatedMs) && value.accumulatedMs >= 0 &&
+        (value.status !== "running" || (typeof value.lastResumeAt === "number" && Number.isFinite(value.lastResumeAt) && value.lastResumeAt > 0))
+      );
+    }
+    if (key.startsWith("csesbm:rev:p:")) {
+      return typeof value.result_id === "string" && /^[A-Za-z0-9_-]{1,80}$/.test(value.result_id);
+    }
+    return (
+      typeof value.result_id === "string" &&
+      /^[A-Za-z0-9_-]{1,80}$/.test(value.result_id) &&
+      isPlainObject(value.data) &&
+      isPlainObject(value.submission) &&
+      typeof value.savedAt === "number" && Number.isFinite(value.savedAt)
     );
   }
 
@@ -270,6 +308,7 @@
 
   async function importBookmarks(file) {
     try {
+      if (!file || file.size > 6000000) throw new Error("too-large");
       const text = await file.text();
       const data = JSON.parse(text);
       const arr = Array.isArray(data) ? data : data && data.bookmarks;
@@ -289,9 +328,11 @@
       let localCount = 0;
       if (data && data.localData && typeof data.localData === "object") {
         const portable = {};
-        Object.keys(data.localData).filter(isPortableLocalKey).forEach((key) => {
+        const localKeys = Object.keys(data.localData).filter(isPortableLocalKey);
+        if (localKeys.length > 160) throw new Error("too-many-local-items");
+        localKeys.forEach((key) => {
           const value = data.localData[key];
-          if (value && typeof value === "object" && !Array.isArray(value)) {
+          if (isPortableLocalValue(key, value)) {
             portable[key] = value;
             localCount += 1;
           }
@@ -306,7 +347,7 @@
     } catch (e) {
       const message = e && e.message;
       flash(
-        message === "format" || message === "wrong-app" || message === "too-many-bookmarks"
+        ["format", "wrong-app", "too-many-bookmarks", "too-many-local-items", "too-large"].includes(message)
           ? "Import failed — this is not a supported CSES Bookmarker backup."
           : "Import failed — Chrome could not restore this backup.",
         true
@@ -326,7 +367,9 @@
 
   searchEl.addEventListener("input", render);
 
-  exportBtn.addEventListener("click", exportBookmarks);
+  exportBtn.addEventListener("click", () => {
+    exportBookmarks().catch(() => flash("Backup failed — Chrome storage could not be read.", true));
+  });
   importBtn.addEventListener("click", () => importFile.click());
   importFile.addEventListener("change", async () => {
     const file = importFile.files && importFile.files[0];
@@ -351,9 +394,13 @@
     clearTimeout(clearTimer);
     clearBtn.classList.remove("confirming");
     clearBtn.textContent = "Clear all";
-    map = {};
-    await CSESBM.clearAll();
-    render();
+    try {
+      await CSESBM.clearAll();
+      map = {};
+      render();
+    } catch (_) {
+      flash("Could not clear bookmarks.", true);
+    }
   });
 
   chrome.storage.onChanged.addListener((changes, area) => {
@@ -393,7 +440,7 @@
       } else {
         reviewTokenHint.hidden = false;
         reviewTokenHint.textContent =
-          "No token yet. .env is ignored — paste hf_… below and Save.";
+          "No token yet. Paste hf_… below and click Save.";
         if (reviewToken) reviewToken.placeholder = "hf_… paste here, then click Save";
       }
     }
@@ -408,9 +455,7 @@
 
   if (reviewSave) {
     reviewSave.addEventListener("click", () => {
-      const settings = {
-        enabled: true,
-      };
+      const settings = {};
       // Only send token when the user typed something new.
       if (reviewToken && reviewToken.value.trim()) {
         settings.hfToken = reviewToken.value.trim();
@@ -425,7 +470,7 @@
           applySettingsToUi(resp.settings);
           setReviewStatus(
             resp.settings && resp.settings.hasToken
-              ? "Saved. Token ready — no server, .env not used."
+              ? "Saved. Token ready for direct Hugging Face reviews."
               : "Saved, but no token yet. Paste hf_… in the token field and Save.",
             !(resp.settings && resp.settings.hasToken)
           );

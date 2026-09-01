@@ -105,7 +105,7 @@
     const body = make("div", "csesbm-rv-loading-wrap");
     body.append(
       make("div", "csesbm-rv-spinner"),
-      make("h3", null, "MiniMax is reviewing your submission"),
+      make("h3", null, "GLM-5.3 is reviewing your submission"),
       make("p", null, "One Hugging Face request · strict JSON · one complete alternative.")
     );
     node.append(header("Submission review", "Working", options), body);
@@ -165,7 +165,7 @@
       const hint = make("div", "csesbm-rv-hint-card");
       hint.append(make("span", "csesbm-rv-hint-icon", "✦"), make("p", null, review.tiny_hint));
       body.append(
-        section("What MiniMax noticed", make("p", "csesbm-rv-copy", review.verdict_summary)),
+        section("What the reviewer noticed", make("p", "csesbm-rv-copy", review.verdict_summary)),
         section("Small hint", hint)
       );
     } else {

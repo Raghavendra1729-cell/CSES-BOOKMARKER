@@ -27,8 +27,12 @@
   }
 
   function localGet(keys) {
-    return new Promise((resolve) => {
-      chrome.storage.local.get(keys, (res) => resolve(res || {}));
+    return new Promise((resolve, reject) => {
+      chrome.storage.local.get(keys, (res) => {
+        const err = chrome.runtime.lastError;
+        if (err) reject(new Error(err.message));
+        else resolve(res || {});
+      });
     });
   }
 
@@ -43,8 +47,12 @@
   }
 
   function localRemove(keys) {
-    return new Promise((resolve) => {
-      chrome.storage.local.remove(keys, () => resolve());
+    return new Promise((resolve, reject) => {
+      chrome.storage.local.remove(keys, () => {
+        const err = chrome.runtime.lastError;
+        if (err) reject(new Error(err.message));
+        else resolve();
+      });
     });
   }
 

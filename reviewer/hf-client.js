@@ -2,24 +2,33 @@
 (function (global) {
   const DEFAULTS = {
     baseUrl: "https://router.huggingface.co/v1",
-    modelId: "MiniMaxAI/MiniMax-M3",
-    // Fireworks currently supports strict structured output for MiniMax-M3;
-    // the former Novita route does not. This is still routed and billed by HF.
-    model: "MiniMaxAI/MiniMax-M3:fireworks-ai",
+    modelId: "zai-org/GLM-5.3",
+    // GLM-5.3 is a coding-focused open-weights model. Pin Fireworks because
+    // Hugging Face currently reports strict structured-output support there.
+    model: "zai-org/GLM-5.3:fireworks-ai",
+    displayName: "GLM-5.3",
     maxTokens: { accepted: 2400, rejected: 220 },
   };
 
   function extractJson(text) {
     let value = String(text || "").trim();
-    const fenced = value.match(/```(?:json)?\s*([\s\S]*?)```/);
-    if (fenced) value = fenced[1].trim();
     try {
       return JSON.parse(value);
     } catch (_) {
-      const start = value.indexOf("{");
-      const end = value.lastIndexOf("}");
-      if (start >= 0 && end > start) return JSON.parse(value.slice(start, end + 1));
-      throw new Error("MiniMax did not return valid JSON.");
+      // Only unwrap a fence when it surrounds the entire response. Looking for
+      // any fence first breaks valid JSON whose `code` string contains Markdown.
+      const fenced = value.match(/^```(?:json)?\s*([\s\S]*?)```\s*$/);
+      if (fenced) value = fenced[1].trim();
+      try {
+        return JSON.parse(value);
+      } catch (_fencedError) {
+        const start = value.indexOf("{");
+        const end = value.lastIndexOf("}");
+        if (start >= 0 && end > start) {
+          try { return JSON.parse(value.slice(start, end + 1)); } catch (_objectError) { /* handled below */ }
+        }
+        throw new Error("The review model did not return valid JSON.");
+      }
     }
   }
 
@@ -29,12 +38,22 @@
     return Array.isArray(value) ? value.map((part) => part.text || "").join("") : "";
   }
 
+  function cleanAlternativeCode(data, accepted) {
+    if (!accepted || !data || !Array.isArray(data.approaches)) return data;
+    data.approaches.forEach((approach) => {
+      if (!approach || typeof approach.code !== "string") return;
+      const fenced = approach.code.trim().match(/^```[^\n]*\n([\s\S]*?)\n```$/);
+      if (fenced) approach.code = fenced[1].trim();
+    });
+    return data;
+  }
+
   async function review(settings, payload, options) {
     if (!settings.hfToken) throw new Error("HF token not set. Add it in the extension popup.");
     options = options || {};
     const accepted = Boolean(payload.accepted);
     const controller = options.controller || new AbortController();
-    const timeoutMs = accepted ? 60000 : 30000;
+    const timeoutMs = accepted ? 90000 : 30000;
     const timer = setTimeout(
       () => controller.abort(new DOMException("Request timed out", "TimeoutError")),
       timeoutMs
@@ -59,6 +78,9 @@
             ],
             max_tokens: accepted ? DEFAULTS.maxTokens.accepted : DEFAULTS.maxTokens.rejected,
             temperature: 0.15,
+            // Spend more reasoning on full accepted-solution analysis while
+            // keeping rejected hints deliberately small and fast.
+            reasoning_effort: accepted ? "high" : "low",
             response_format: {
               type: "json_schema",
               json_schema: global.CSESReviewSchema.jsonSchema(accepted),
@@ -85,7 +107,7 @@
         error.failureType = "length";
         throw error;
       }
-      const data = extractJson(messageContent(choice));
+      const data = cleanAlternativeCode(extractJson(messageContent(choice)), accepted);
       const problem = global.CSESReviewSchema.validate(data, accepted);
       if (problem) {
         const error = new Error(problem);
