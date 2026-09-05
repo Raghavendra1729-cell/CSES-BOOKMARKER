@@ -108,6 +108,11 @@ li.task.csesbm-marked {
   background: rgba(255, 255, 255, 0.14);
 }
 
+.csesbm-timer-btn:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
 .csesbm-toast {
   position: fixed;
   right: 18px;

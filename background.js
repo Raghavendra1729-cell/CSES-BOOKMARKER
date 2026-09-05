@@ -5,7 +5,8 @@ importScripts(
   "reviewer/hf-client.js",
   "reviewer/review-cache.js",
   "reviewer/problem-context.js",
-  "reviewer/request-key.js"
+  "reviewer/request-key.js",
+  "reviewer/review-coordinator.js"
 );
 
 const PREFIX = "csesbm:";
@@ -15,8 +16,7 @@ const DEFAULT_REVIEW_SETTINGS = {
   hfToken: "",
   baseUrl: CSESReviewHF.DEFAULTS.baseUrl,
 };
-const activeReviews = new Map();
-const inFlightReviews = new Map();
+const reviewCoordinator = CSESReviewCoordinator.create();
 const problemContextCache = new Map();
 let metricWrite = Promise.resolve();
 
@@ -201,26 +201,9 @@ function postReview(submission, options) {
   // A forced refresh must never attach itself to a cache-eligible request.
   const key = (options.force ? "refresh:" : "normal:") + CSESReviewRequestKey.forSubmission(submission);
   const requestId = String(options.requestId || crypto.randomUUID()).slice(0, 128);
-  const existing = inFlightReviews.get(key);
-  if (existing) {
-    existing.requestIds.add(requestId);
-    activeReviews.set(requestId, existing.controller);
-    return existing.task;
-  }
-
-  const controller = new AbortController();
-  const requestIds = new Set([requestId]);
-  activeReviews.set(requestId, controller);
-  const task = performReview(submission, { ...options, requestId, controller });
-  const entry = { controller, requestIds, task };
-  inFlightReviews.set(key, entry);
-  task.finally(() => {
-    requestIds.forEach((id) => {
-      if (activeReviews.get(id) === controller) activeReviews.delete(id);
-    });
-    if (inFlightReviews.get(key) === entry) inFlightReviews.delete(key);
+  return reviewCoordinator.acquire(key, requestId, (controller) => {
+    return performReview(submission, { ...options, requestId, controller });
   });
-  return task;
 }
 
 async function fetchWithTimeout(url, init, timeoutMs) {
@@ -257,8 +240,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       sendResponse({ ok: false });
       return;
     }
-    const controller = activeReviews.get(message.requestId);
-    if (controller) controller.abort();
+    reviewCoordinator.cancel(message.requestId);
     sendResponse({ ok: true });
     return;
   }

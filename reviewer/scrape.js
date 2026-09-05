@@ -72,14 +72,23 @@
         out.verdictRaw = val;
       } else if (key.includes("language") || key === "lang") {
         out.language = val;
-      } else if (key === "time" || key.includes("time")) {
+      } else if (
+        key === "time" ||
+        key === "runtime" ||
+        key.includes("execution time") ||
+        key.includes("running time")
+      ) {
         const m = val.match(/([\d.]+)\s*ms/i);
         if (m) out.time_ms = Math.round(parseFloat(m[1]));
         else {
           const s = val.match(/([\d.]+)\s*s/i);
           if (s) out.time_ms = Math.round(parseFloat(s[1]) * 1000);
         }
-      } else if (key.includes("memory")) {
+      } else if (
+        key === "memory" ||
+        key === "memory usage" ||
+        key.includes("used memory")
+      ) {
         const kb = val.match(/([\d.]+)\s*k/i);
         const mb = val.match(/([\d.]+)\s*m/i);
         if (kb) out.memory_kb = Math.round(parseFloat(kb[1]));
