@@ -247,14 +247,21 @@
     if (state.status === "running") startTicker();
 
     btn.addEventListener("click", async () => {
-      if (state.status === "running") {
-        state = await CSESTimer.pause(id);
-        clearInterval(ticker);
-      } else if (state.status === "paused") {
-        state = await CSESTimer.resume(id);
-        startTicker();
+      btn.disabled = true;
+      try {
+        if (state.status === "running") {
+          state = await CSESTimer.pause(id);
+          clearInterval(ticker);
+        } else if (state.status === "paused") {
+          state = await CSESTimer.resume(id);
+          startTicker();
+        }
+        render();
+      } catch (_) {
+        btn.title = "Timer could not be saved — click to retry";
+      } finally {
+        btn.disabled = false;
       }
-      render();
     });
   }
 
